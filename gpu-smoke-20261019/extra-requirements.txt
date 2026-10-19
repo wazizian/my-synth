@@ -1,0 +1,4 @@
+chex>=0.1.88
+optax==0.2.8
+pytest>=8,<10
+numpy>=2

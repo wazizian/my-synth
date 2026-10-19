@@ -1,0 +1,215 @@
+Vast.ai RTX 4090 smoke test
+
+Run: python /home/jump/vast-tools/smoke.py
+Search without renting: python /home/jump/vast-tools/smoke.py --search-only
+Retry cleanup: python /home/jump/vast-tools/smoke.py --cleanup
+Change listed hourly cap: add --max-hourly 0.50 (default: USD 0.60).
+
+Uses ~/vast_ai_api.txt and ~/.ssh/id_ed25519_vastai (+ .pub) in place;
+no secrets are copied into this directory or command-line arguments.
+Requires Python 3 and OpenSSH, outbound HTTPS to console.vast.ai,
+and outbound SSH to the selected host.
+
+Selects one verified RTX 4090 with >=24000 MB VRAM and 20 GB disk,
+waits up to 5 minutes for SSH, checks nvidia-smi and runs 15 seconds
+of PyTorch GPU matrix multiplication. Always attempts destruction
+on exit and confirms disappearance from active instances. Destruction
+also removes instance storage. Downloads/bandwidth can cost extra.
+
+A separate local process attempts cleanup after 10 minutes. This is
+not a provider-side spending limit; it cannot help if this local host
+shuts down or loses network access. If cleanup is unconfirmed, inspect
+active.json and destroy the labeled instance in the Vast.ai console.
+Only instances with the unique saved run label are touched.
+
+Implementation reference: https://github.com/vast-ai/vast-cli/blob/master/vast.py
+Live validation on 2026-10-17: instance 56388826 reported an NVIDIA
+GeForce RTX 4090 with 24564 MiB VRAM. PyTorch completed 41021 matrix
+multiplications in 15 seconds; all outputs were finite. Instance was
+destroyed afterward. An earlier setup attempt (56388762) was also
+destroyed. Network access is now working in the agent session.
+
+Compatibility fixes: listing uses /api/v1/instances/ (v0 is deprecated);
+an already-associated SSH key is accepted; SSH uses -F /dev/null to
+avoid this host's invalid system SSH config permissions.
+
+JAX / JAXLIB / EQUINOX JOBS
+==========================
+
+Quick start (rents a GPU, installs CUDA dependencies, verifies the GPU,
+runs a small training example, collects outputs, and destroys the GPU):
+
+  python /home/jump/vast-tools/job.py --timeout-seconds 180
+
+Run your own standalone Python script:
+
+  python /home/jump/vast-tools/job.py --job /absolute/path/train.py \
+    --timeout-seconds 3600 --max-hourly 0.60 -- --steps 1000
+
+Additional packages (resolved together with the pinned base requirements):
+
+  python /home/jump/vast-tools/job.py --job /absolute/path/train.py \
+    --requirements /absolute/path/extra-requirements.txt
+
+Search without creating or billing an instance:
+
+  python /home/jump/vast-tools/job.py --search-only
+
+Environment:
+  - Proven pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime container for SSH.
+    uv installs Python 3.12 into an isolated /opt/jax virtual environment;
+    uv manages Python and all packages; the job uses CUDA 13 wheels,
+    independent of the image toolkit. uv is installed with its standalone
+    installer (version 0.13.1); pip is never invoked or seeded.
+  - requirements-jax.txt pins JAX 0.11.2, jaxlib 0.11.2, Equinox 0.13.8.
+  - jax[cuda13] installs NVIDIA CUDA libraries through uv; no local CUDA
+    toolkit install is required. Offers must report CUDA 13 capability.
+  - JAX_PLATFORMS=cuda forces a GPU backend; CPU fallback fails the run.
+  - LD_LIBRARY_PATH is unset to avoid overriding the installed CUDA libraries.
+  - JAX GPU memory preallocation is disabled. Jobs may change that policy.
+  - A preflight performs real JIT compilation and Equinox gradient updates
+    and asserts that training loss decreases on the RTX 4090.
+
+Job interface:
+  - Only the selected Python file and explicit requirements are uploaded.
+    Project folders, local imports, datasets, and credentials are not
+    automatically transferred. Package your code or fetch data in the job.
+  - Remote working directory: /workspace/job.
+  - Write all results/checkpoints under JOB_OUTPUT_DIR, which is
+    /workspace/job/outputs. Outputs elsewhere are not collected.
+  - Job arguments follow -- and are passed as literal arguments.
+  - Preflight artifacts go in outputs/preflight/. User-job artifacts go
+    under outputs/, so the preflight does not overwrite user results.
+  - Never put API tokens into your script or requirements file. The Vast
+    API key and SSH private key remain on this server.
+
+Results on this Hetzner server:
+  /home/jump/vast-tools/runs/<UTC timestamp>-<random suffix>/
+    console.log      setup, verification, and user-job stdout/stderr
+    metadata.json    image, input path, instance label/offer, SSH endpoint
+    outputs/         incremental local mirror of remote outputs
+    sync.log         transfer diagnostics
+    sync-status.json time of the most recent completed transfer
+    artifacts.json   final file inventory, sizes, SHA-256 hashes
+
+outputs/ includes environment.txt (uv freeze), requirements.lock (fully
+resolved dependencies), nvidia-smi.txt, uv-version.txt, and gpu.csv with
+GPU utilization, memory usage, temperature, and power sampled every 5s.
+
+Metrics and checkpoint collection:
+  - JOB_METRICS_DIR=/workspace/job/outputs/metrics
+  - JOB_CHECKPOINT_DIR=/workspace/job/outputs/checkpoints
+  - The launcher uses incremental rsync every 30s during execution,
+    then a final sync (up to 3 attempts) before destroying the instance.
+    --sync-interval 10 requests more frequent collection (minimum 10s).
+    --sync-timeout-seconds 600 allows up to 10 minutes per transfer for
+    large checkpoints; the default is 300 seconds per transfer. Transfers
+    fail after 60 seconds without network activity and are retried later.
+  - Local files are immediately available in runs/<run>/outputs/metrics/
+    and runs/<run>/outputs/checkpoints/ while the job is running.
+  - A successful final transfer is recorded in sync-status.json. SHA-256
+    hashes and byte sizes of fetched files are recorded in artifacts.json.
+  - No --delete is used: checkpoints already fetched remain locally even
+    when the job later rotates or deletes its remote checkpoints.
+  - Remote files must be closed/renamed atomically before they count as
+    complete checkpoints. Write a name containing .tmp and os.replace it
+    to the final name; *.tmp* is excluded from transfers. The example does
+    this for four numbered .eqx checkpoints and flushes metrics as JSONL.
+  - Batch metric writers must flush/close their files; unflushed memory
+    buffers cannot be fetched. A JSONL file can end in a partial line
+    during a live transfer; parse complete lines until the final sync.
+  - --require-artifact 'metrics/*.jsonl' --require-artifact 'checkpoints/*.eqx'
+    makes the launcher fail if expected files were not retrieved. Patterns
+    are relative to outputs/. The bundled example requires its final
+    checkpoint and metrics file automatically.
+  - This retrieves files; it does not pull data from external W&B/TensorBoard
+    services unless your job also writes local files under outputs/.
+  - Local/remote rsync is required. This Hetzner host already has rsync;
+    remote setup installs rsync and curl through apt, then uses uv only
+    for Python environments, dependency resolution, and installation.
+
+Example custom invocation with required metrics and checkpoints:
+
+  python /home/jump/vast-tools/job.py --job /absolute/path/train.py \
+    --sync-interval 30 --require-artifact 'metrics/*.jsonl' \
+    --require-artifact 'checkpoints/*.eqx' -- --steps 1000
+
+Limits and cleanup:
+  - Defaults: one RTX 4090, 40 GB disk, USD 0.60 listed hourly price cap,
+    10 minutes to become SSH-ready, 15 minutes for installation, 30 minutes
+    for verification plus the user job, up to 3 final download attempts (5 minutes each by default).
+  - Jobs select hosts advertising >=500 Mbps downloads to reduce setup
+    delays. --boot-timeout-seconds changes the default 10-minute boot wait.
+  - --timeout-seconds changes the verification + user-job runtime limit.
+    It does not include installation or boot time. --disk must be >=30 GB.
+  - The watchdog is adjusted to boot + setup + job + one in-progress transfer + three final transfer attempts + margin;
+    the old smoke test's 10-minute timer is not used for longer jobs.
+  - Live stdout/stderr is saved to console.log; inspect that file during
+    a running job. The parent prints its tail after successful completion.
+  - Even on job/setup failure, output retrieval is attempted before cleanup.
+    Failed retrieval is reported; destruction still proceeds and any
+    uncollected instance data is lost. Important jobs should also upload
+    checkpoints to durable storage themselves.
+  - Only one managed run may be active at once (shared active.json).
+  - Emergency cleanup: python /home/jump/vast-tools/smoke.py --cleanup
+    Or destroy the instance with the saved label in the Vast.ai console.
+  - Cleanup is verified via the API. If it cannot be verified, active.json
+    is retained for retry. The local watchdog requires this server to stay
+    running and connected. Billing includes boot/setup/download time;
+    bandwidth can cost extra, so the hourly cap is not a total-spend cap.
+
+Maintenance:
+  Update requirements-jax.txt deliberately, then rerun the example job on
+  a real GPU before using new versions for longer jobs. Each run records
+  its full resolved package versions in outputs/environment.txt and a
+  resolved requirements.lock generated by uv pip compile and installed
+  with uv pip sync. The uv pip namespace is uv itself; it does not run pip.
+  No instance is intentionally kept idle between jobs.
+
+Primary references:
+  https://docs.jax.dev/en/latest/installation.html
+  https://docs.kidger.site/equinox/
+  https://vast.ai/developers/api
+
+uv references:
+  https://docs.astral.sh/uv/pip/compile/
+  https://docs.astral.sh/uv/reference/installer/
+
+JAX JOB VALIDATION, 2026-10-17
+=============================
+End-to-end run: runs/20261017T115256Z-7724bae3/
+Instance: 56390114, RTX 4090, listed USD 0.4244/hour.
+Python 3.12.15 and all dependencies were installed through uv 0.13.1
+(standalone installer; no pip invocation). JAX/jaxlib 0.11.2 with the
+CUDA 13 plugin and Equinox 0.13.8 passed real GPU JIT/gradient training.
+Loss fell from 4.821553 to 0.105911 over 100 steps.
+
+Fetched artifacts include 10 JSONL metric records, four numbered Equinox
+checkpoints, preflight results/checkpoints, GPU telemetry, the resolved
+requirements.lock, and the environment version list. File sizes and SHA-256
+hashes are in artifacts.json. Final output sync succeeded before instance
+destruction; the API confirmed no remaining managed instances.
+
+Local simulated integration checks covered success, job failure, missing
+required artifacts, and transfer failure. They verify that output collection
+is attempted before cleanup, hashes are recorded for fetched files even
+when a job fails, missing artifacts cause failure, and transfer failures
+are retried. Label-scoped cleanup also prevents an old run from destroying
+a newer run. Earlier unsuccessful setup instances were destroyed as well.
+
+OFFER EXCLUSION, 2026-10-18
+===========================
+job.py accepts repeatable --exclude-offer ID to skip a measured unsuitable offer
+without mislabeling it as stale. Example: --exclude-offer 54008097 excludes a
+host observed taking12+ minutes for CUDA downloads. Default selection is unchanged.
+All price/runtime/one-managed-instance/cleanup safeguards remain in force.
+This is a selection-only change; GPU installation/runtime packages are unchanged.
+Selection flag validated on live instance56543750 (offer37930531) while excluding
+offer54008097; CUDA JAX/Equinox preflight passed. Run20261018T112207Z-ff7fd40b.
+Offer search now requests100 rows before local stale/excluded/price filtering.
+A10-row page could be exhausted by known stale offers despite eligible live
+offers elsewhere in the response. Price/hardware/runtime caps are unchanged.
+
+2026-10-18: campaign-only resilience change: numerical workload detached with nohup/setsid, file-backed stdout and atomic exit marker, remote timeout unchanged. SSH polling retries do not restart work. Existing output sync, final inventory and API-confirmed cleanup remain. Validate with real GPU preflight on each resumed job.
+
+Verified export hardening: systemd global watchdog owns deadlines; cleanup requires final sync plus matching remote/local SHA256 inventory and required artifacts. Incomplete external selfplay history or failed export stops the instance and preserves disk with deadline-alert.json.

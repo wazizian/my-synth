@@ -1,0 +1,92 @@
+\documentclass{article}
+\usepackage[margin=1cm]{geometry}
+\usepackage{amsmath,amssymb}
+\begin{document}
+\section*{Final assessment}
+Neither of the two frozen benchmark families passed the full development gate. The plan requires stopping before adaptive training and final-test evaluation. This is an uninformative benchmark for the proposed adaptive comparison.
+Provider-reported cost: USD 0.838. All instances shut down.
+\subsection*{Development specialization gates}
+\begin{tabular}{lllll}
+Family & Target & Improvement & 95\% interval & Minimum \\
+A & easy & 0.00001605 & [-0.00002448, 0.00005525] & 0.00020 \\
+A & hard & 0.00003079 & [-0.00001601, 0.00007696] & 0.00050 \\
+B & easy & 0.00003590 & [0.00000003, 0.00007177] & 0.00020 \\
+B & hard & 0.00002600 & [-0.00002789, 0.00007407] & 0.00050 \\
+\end{tabular}
+\paragraph{Scope.} Single training seed; episode intervals are conditional on the policies. All scientific learners used float64 after a pretraining precision repair. Results concern the declared daily discrete simulator; continuous-time discretization error is not certified at the improvement threshold. Family A changes model-family coverage as well as sampling allocation. Detailed numerical limitations and provenance are in the accompanying Markdown report.
+
+\section*{Single-seed entropic benchmark gate}
+Accepted candidate: None. Uncertainty is conditional on trained policies.
+\begin{tabular}{llllll}
+Candidate & Arm & Domain & Entropic & CVaR95 & Daily SD \\
+A & baseline & base & 0.023808 & 0.045505 & 0.002080 \\
+A & baseline & easy & 0.024198 & 0.042588 & 0.001886 \\
+A & baseline & hard & 0.023536 & 0.049160 & 0.002192 \\
+A & easy reference & base & 0.023801 & 0.046706 & 0.002057 \\
+A & easy reference & easy & 0.024182 & 0.043761 & 0.001844 \\
+A & easy reference & hard & 0.023524 & 0.050293 & 0.002176 \\
+A & hard reference & base & 0.023778 & 0.046405 & 0.002156 \\
+A & hard reference & easy & 0.024183 & 0.044049 & 0.001982 \\
+A & hard reference & hard & 0.023505 & 0.049764 & 0.002260 \\
+B & baseline & base & 0.023730 & 0.046674 & 0.002134 \\
+B & baseline & easy & 0.021740 & 0.040910 & 0.001858 \\
+B & baseline & hard & 0.023177 & 0.053546 & 0.002384 \\
+B & easy reference & base & 0.023716 & 0.048262 & 0.002204 \\
+B & easy reference & easy & 0.021704 & 0.042034 & 0.001904 \\
+B & easy reference & hard & 0.023161 & 0.055070 & 0.002457 \\
+B & hard reference & base & 0.023729 & 0.046701 & 0.002189 \\
+B & hard reference & easy & 0.021736 & 0.041786 & 0.001942 \\
+B & hard reference & hard & 0.023151 & 0.053128 & 0.002413 \\
+\end{tabular}
+\section*{Design and methods}
+The experiment uses one training seed, 20261017, shared initial weights and a stock-only recurrent hedger. There are 32 context days and 20 daily hedge intervals; the payoff is an at-the-money European call struck at the observed inception spot. Rates are zero, positions are bounded by two shares in inception-normalized units, and proportional trading and liquidation costs are 0.001 in every domain. The GRU has five inputs and 32 hidden units with a scalar bounded head. Its inputs are causal returns, inception-relative moneyness, time, previous holdings and a trading indicator. Realized variance, regime, scenario labels, future switches and liability marks are excluded.
+
+Family A compares Black--Scholes easy dynamics with base stochastic-local volatility (SLV) and hidden-regime SLV hard dynamics. Its baseline is pure base SLV; adaptive sampling would broaden model-family support as well as change allocation. Family B uses a common finite menu with baseline masses 0.05 easy, 0.90 ordinary and 0.05 hard. In both families, the hard initial regime is uniform over two states and flips once at an unannounced trading interval drawn uniformly from 6 through 10. It remains in the new state thereafter. The stock and variance Brownian innovations are independent.
+
+\begin{center}
+\begin{tabular}{lllll}
+Family/domain & $\kappa$ & $\theta$ & $\xi$ & $v_0$ \\
+A easy & 8 & .04 & 0 & .04 \\
+A base & 6 & .04 & .35 & .04 \\
+A hard & 8 & .02/.06 & .25/.65 & .04 \\
+B easy & 8 & .032 & .04 & .032 \\
+B base & 6 & .04 & .30 & .04 \\
+B hard & 8 & .015/.065 & .30/.80 & .04
+\end{tabular}
+\end{center}
+
+The synthetic leverage is $L=1+a\tanh(-2\log(S/\mathrm{anchor}))$, with $a=0$ for A easy and $a=.15$ otherwise. It is not market-calibrated. The anchor is the context-start spot during context and resets predictably to inception spot for hedging; this convention is shared across domains. The daily simulator uses
+\[
+S_{t+1}=S_t\exp\{-\tfrac12L_t^2v_t\Delta t+L_t\sqrt{v_t\Delta t}\,Z_t\},\qquad\Delta t=1/252,
+\]
+with an exact CIR variance transition over each interval and regime coefficients frozen during that interval. Physical and pricing laws coincide. The stock time discretization is explicit: conclusions concern this declared discrete simulator, not exact continuous-time SLV.
+
+Evaluation marks condition on observed price history under the declared domain law. A joint scenario/variance filter uses lognormal observation likelihoods and CIR bin-transition probabilities. Backward integration uses Gauss--Hermite stock integration and interpolation. Production grids contain 192 variance nodes, 1601 log-spot nodes and 64 quadrature nodes; the reference doubles each dimension. Independent forward Monte Carlo and an independent filter implementation supplement grid refinement. Specialists receive no privileged observations.
+
+\section*{Objectives, metrics and gate}
+For positive normalized losses, the learner minimizes
+\[
+X_\theta=\frac{\mathrm{payoff}-\mathrm{trading\ gains}+\mathrm{costs}}{S_{\mathrm{inception}}},\qquad
+R_\gamma(X)=\gamma^{-1}\log\mathbb E[e^{\gamma X}],\quad\gamma=10.
+\]
+The minibatch objective is stable log-mean-exp with 256 paths; it is not an exact population-risk estimator. Adam uses learning rate .001 and global gradient clipping at one, in blocks of eight updates. All scientific learners and optimizer states use float64 after the documented common pretraining precision repair. Initial numeric weights, architecture and other settings are shared.
+
+CVaR95 uses fractional empirical boundary mass. Daily errors are
+\[
+e_t=(V_{t+1}-V_t-h_t(S_{t+1}-S_t)+C_t)/S_{\mathrm{inception}},\qquad
+\mathrm{daily\ SD}=\sqrt{\frac1H\sum_t\operatorname{Var}_{\mathrm{episodes}}(e_t)}.
+\]
+Initial trading and terminal liquidation costs enter exactly once. The accounting check verifies $\sum_t e_t=X_\theta-V_0/S_{\mathrm{inception}}$. Mean loss, initial value, costs, turnover, per-day means, terminal SD and mean-centered terminal entropic/CVaR risks are retained separately.
+
+Each family first receives baseline, easy-reference and hard-reference runs with equal 180-active-second budgets and checkpoint opportunities at 0, 60, 120 and 180 seconds. Selection uses 2048 separate paths per domain: baseline selects on base risk, specialists on their own domain. Screening uses 8192 paired paths per domain and 400 whole-episode bootstrap draws. The lower endpoint of the 95\% interval for baseline-minus-specialist entropic risk must exceed .0002 on easy and .0005 on hard. Easy specialist residual difficulty must be below hard across daily and centered terminal diagnostics, with positive lower intervals for terminal and daily SD differences. A supplemental $X-V_0$ review rejects material contradictions after conservative numerical margins. Its protocol was recorded before training; primary gate outcomes remain separately visible.
+
+A screening pass requires fresh confirmation before benchmark acceptance. A is preferred if both confirm. No additional market candidates, outcome-based severity changes, threshold reductions or seed repeats are allowed. Neither specialist is claimed to be an optimal hedge. Failure of both families requires stopping before adaptive training or final-test evaluation.
+
+If a benchmark is accepted, the eight-arm comparison gives every arm 600 active seconds, with fixed methods continuing their diagnostic state. DPG differentiates normalized weighted entropic risk through the carried clipped-Adam updates; SOAR uses paired target-risk improvement with a past-improvement baseline; self-play uses intrinsic historical entropic-gradient contributions. Hard teachers target raw hard entropic risk; mixed teachers use equally weighted easy/hard risks divided by frozen positive development scales. Teacher work and feedback counts are recorded. Selection and all final dataset hashes are frozen before final evaluation. All intervals remain conditional on one trained seed.
+
+\section*{Reproducibility and interpretation}
+The accompanying Markdown report links the canonical raw arrays, per-checkpoint metrics, resumable learner/optimizer/PRNG states, validation failures and repairs, source/configuration hashes, figures, numerical audits and provider accounting. Exact export and provider shutdown checks are recorded. The initial coarse pricing resolution and float32 attribution checks failed; their artifacts were retained. No scientific policy was trained until both frozen families passed the final numerical checks.
+
+Monte Carlo time-refinement diagnostics retain sampling uncertainty and do not certify continuous-time discretization error at the minimum useful-gain scale. The finite validation grid/path checks are not a uniform error proof over all latent states. Family A's coverage difference, finite minibatch estimation, equal-time rather than equal-update budgets, and single-seed conditional inference limit causal and generality claims. Empty event plots indicate absence of qualifying switches, not zero risk. No utility-indifference-price, irreducible-optimal-risk or across-seed significance claim is made.
+
+\end{document}

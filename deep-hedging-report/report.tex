@@ -1,0 +1,185 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=19mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,graphicx,booktabs,amsmath,xcolor,hyperref,fancyhdr}
+\hypersetup{colorlinks=true,urlcolor=blue,linkcolor=blue,pdftitle={Deep hedging: training and evaluation curves}}
+\pagestyle{fancy}\fancyhf{}\lhead{Deep hedging experiments}\rhead{18 October 2026}\cfoot{\thepage}
+\setlength{\headheight}{14pt}
+\setlength{\parindent}{0pt}\setlength{\parskip}{7pt}
+\newcommand{\plot}[2]{\begin{center}\includegraphics[width=\linewidth,height=#2,keepaspectratio]{figures/#1.pdf}\end{center}}
+\begin{document}
+\begin{center}
+{\LARGE\bfseries Deep hedging}\\[5pt]
+{\Large Training losses and evaluation curves}\\[8pt]
+Results snapshot: 18 October 2026
+\end{center}
+
+\section*{Experiment and main observations}
+This report reconstructs learning curves from the Hetzner archive:\\
+\texttt{/home/jump/deep-hedging/results}. It covers the seven scientific
+\texttt{-lr001} runs, excluding smoke and profiling runs. Each method completed
+2,700 seconds (45 minutes) of active training with seed 20261017.
+
+The selected fixed base-distribution baseline has the lowest final base MSE,
+easy MSE and balanced scaled loss. SOAR mixed has the lowest hard MSE, improving
+on baseline by approximately 0.30\%, while worsening its base and easy losses.
+These are single-seed observations, not statistically established rankings.
+
+\subsection*{What is being measured?}
+The per-episode loss is squared normalized hedging shortfall:
+\[
+ Z=\frac{\text{payoff}-\text{initial premium}-\text{trading gains}
+                 +\text{transaction and liquidation costs}}{S_{\mathrm{inception}}},
+ \quad L_d=\frac{1}{N_d}\sum_{i=1}^{N_d} Z_i^2.
+\]
+The CSV field \texttt{raw\_mse} means $L_d$ before reference-scale normalization;
+it is already spot-normalized and is not a dollar-squared loss. Lower is better.
+The development checkpoint-selection objective is
+\[
+ B=\tfrac12\left(\frac{L_{\mathrm{easy}}}{s_{\mathrm{easy}}}
+                  +\frac{L_{\mathrm{hard}}}{s_{\mathrm{hard}}}\right),
+ \quad s_{\mathrm{easy}}=0.00105552154,\quad
+ s_{\mathrm{hard}}=0.00281462749.
+\]
+Base is reported separately, with reference scale $s_{\mathrm{base}}=0.00150060048$.
+
+\begin{center}\begin{tabular}{lll}\toprule
+Data stream & Episodes per domain & Purpose\\\midrule
+Training & 256 per learner step & Fresh samples from each method's generator\\
+Monitor & 512 & Fixed evaluation data during training\\
+Selection & 1,024 & Fixed development data for checkpoint choice\\
+Final test & 8,192 & Evaluation after selection was frozen\\\bottomrule
+\end{tabular}\end{center}
+
+Training logs record the mean of four pre-update minibatch losses in a sampled
+block, roughly every 30 active seconds. They are not averages over the intervening
+30 seconds. The report uses 91 records per method, including the screening and
+final terminal records. Active time excludes compilation, evaluation and
+checkpoint/history I/O; it is not total paid wall time.
+
+The following pages separate sampled training loss, monitor curves, development
+selection and retrospective final-test curves. Lines join measured checkpoints;
+no evaluation smoothing or uncertainty bands are applied.
+
+\clearpage
+\section*{1. Loss during training}
+\plot{training}{0.76\textheight}
+{\small Faint lines show all logged block losses; bold lines show a centered
+five-record rolling median (fewer records at the edges). All panels share a
+logarithmic vertical scale. The smoother is descriptive only.}
+
+The hard reference samples a fixed hard distribution; adaptive methods change
+their training distribution. Thus a higher training loss can reflect harder
+sampled episodes. These training curves alone do not rank generalization.
+
+\clearpage
+\section*{2. Monitor evaluation during training}
+\plot{monitor}{0.75\textheight}
+{\small Fixed monitor set: 512 episodes per domain. Left: the full trajectory,
+with a logarithmic MSE axis. Right: a linear-axis zoom after five active minutes.
+The plotted quantity is $10^4L_d$; each row has its own vertical range.}
+
+The full view exposes the initial improvement, while the zoom resolves later
+checkpoint fluctuations and differences between methods. Domain-specific raw
+loss levels should be compared across methods within the same domain. Monitor
+results are distinct from the development selection objective.
+
+\clearpage
+\section*{3. Development evaluation and checkpoint selection}
+\plot{selection}{0.66\textheight}
+{\small Fixed selection set: 1,024 episodes per domain. Curves show recorded
+checkpoints after five minutes; the untrained checkpoint is omitted from this
+zoom. Open rings in the balanced-loss panel identify the frozen choices. Base
+loss does not enter the balanced easy/hard selection objective.}
+
+Selection was frozen on 18 October 2026 at 01:54:09 UTC, before final-test
+evaluation. Six methods selected their terminal 45-minute checkpoint; SOAR mixed
+selected its 30-minute checkpoint (1,800.06 active seconds), although its lineage
+continued to 45 minutes. The final table therefore compares development-selected
+checkpoints, not necessarily the last checkpoint of every method.
+
+\clearpage
+\section*{4. Retrospective final-test curves}
+\plot{final_test}{0.75\textheight}
+{\small Fixed final-test set: 8,192 episodes per domain. These evaluations were
+performed after selection was frozen. The horizontal axis denotes the training
+age of the saved checkpoint, not the time when its test evaluation ran. Left:
+full trajectory, logarithmic MSE. Right: linear zoom after five minutes.}
+
+These curves describe how saved policies perform on the final datasets. They
+were not the online feedback stream and must not be used to retroactively change
+the reported checkpoint selection. Repeated checkpoints share the same dataset;
+they are not independent replications.
+
+\clearpage
+\section*{5. Selected-checkpoint results}
+\begin{center}\small
+\begin{tabular}{lrrrrr}\toprule
+Method & Time (min) & Base & Easy & Hard & Balanced\\
+ & & \multicolumn{3}{c}{MSE $\times 10^4$} & scaled loss\\\midrule
+\input{results_table.tex}\end{tabular}\end{center}
+
+The baseline has the best base, easy and balanced test losses. SOAR mixed reduces
+hard MSE by $5.96\times10^{-7}$ relative to baseline, but increases base MSE by
+$1.91\times10^{-6}$ and easy MSE by $1.24\times10^{-6}$. Hard reference and SOAR
+hard have still smaller measured hard-domain advantages. Neither DPG variant nor
+selfplay improves any of the three selected-test MSEs over baseline.
+
+\plot{diagnostics}{0.38\textheight}
+{\small Left: learner updates versus active time. Right: logged generator KL
+relative to the base distribution, on a symmetric-log scale with a linear region
+near zero. These diagnostics contextualize loss trajectories; they do not isolate
+causal effects of the teaching mechanism.}
+
+DPG achieves fewer learner updates within the time budget. Selfplay moves much
+further from the base sampling distribution. The fixed hard reference also has
+nonzero KL because its distribution differs from the base by construction.
+
+\clearpage
+\section*{6. Interpretation limits and reproducibility}
+\textbf{Single-seed scope.} All scientific runs use seed 20261017; there is no
+independent-seed uncertainty estimate. The tuning scope is narrow (generator
+learning rate 0.001). These synthetic experiments use a finite, 12-regime Heston
+menu. They do not establish performance on other distributions or live markets.
+
+\textbf{Small hard-domain differences.} The archived report describes a separate
+32-episode-per-domain pricing sensitivity check. No baseline-relative signs
+reversed in that bounded check, but it does not certify the full-test gaps or
+rare-tail behavior. Small hard-domain improvements should therefore be treated
+as measured differences rather than robust superiority.
+
+\textbf{Loss is not the whole financial outcome.} MSE does not summarize all
+signed PnL, expected shortfall, turnover or transaction-cost behavior. This
+report concentrates on the requested training and evaluation losses; the source
+CSVs retain additional metrics.
+
+\textbf{Time comparisons.} Runs use the same GPU model but not controlled hosts
+or clocks. Active time excludes evaluation, compilation and I/O. Equal active
+training time is neither equal learner-step count nor equal total compute cost.
+
+\subsection*{Local reproducibility}
+The report directory includes the LaTeX source, vector PDF figures, PNG previews,
+the plotting script, archived CSV inputs and a SHA-256 manifest. Plot inputs are
+\texttt{all\_events.csv}; the selected-results table comes from
+\texttt{final\_metrics.csv}. Frozen identifiers are read from
+\texttt{frozen\_selection.json}. The archived \texttt{report.md} supplies campaign
+context. A snapshot of the relevant runner, objective and metric source files
+records the loss definitions inspected for this report.
+
+The build script checks finite positive losses, unique evaluation records and
+agreement between each frozen selected checkpoint's final metrics and its raw
+event rows. It filters scientific runs using the frozen-selection manifest,
+sorts curves by cumulative active time, and removes duplicate training records
+at the same run/update count. It does not recompute GPU metrics from episode
+arrays or rerun training.
+
+From the report directory, rebuild with:
+\begin{verbatim}
+python build_report.py
+latexmk -pdf -interaction=nonstopmode -halt-on-error report.tex
+\end{verbatim}
+Python dependencies: NumPy, pandas and Matplotlib. A standard LaTeX installation
+with the packages declared in \texttt{report.tex} is required. The archived
+\texttt{manifest.json} identifies the exact local source snapshot used.
+
+\end{document}

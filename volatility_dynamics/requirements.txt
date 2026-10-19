@@ -1,0 +1,4 @@
+jax>=0.7,<0.8
+chex>=0.1.88
+numpy>=1.26
+matplotlib>=3.8

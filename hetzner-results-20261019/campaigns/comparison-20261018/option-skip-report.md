@@ -1,0 +1,1 @@
+The option comparison was skipped because none of the three declared transaction costs passed both the specialist screen and independent confirmation. The useful-gain threshold remained 0.0005, and no final test stream was opened. Development diagnostics remain under volatility-shocks-20261018/gate-1bp-results.json, gate-3bp-results.json and gate-10bp-results.json.

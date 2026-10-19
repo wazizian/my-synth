@@ -1,0 +1,45 @@
+# Local environments and caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+/cache/
+
+# Large scientific payloads remain outside Git
+*.npz
+*.eqx
+*.tar
+*.tar.gz
+/workers/
+/source_snapshots/
+/data/*
+!/data/manifest.json
+
+# Preserve compact run configurations, metrics and outcomes
+/runs/*/*
+!/runs/*/config.json
+!/runs/*/status.json
+!/runs/*/train_metrics.jsonl
+!/runs/*/evaluation_metrics.jsonl
+!/runs/*/final_test_*.json
+
+# Generated launch bundles and transient operational files
+/*_job.py
+/queue/*.log
+/queue/*.lock
+/budget/lock
+/budget/account*
+/budget/instances_current.json
+/budget/offers.json
+/budget/provider_charges_latest.json
+/results/worker_environments/
+
+# Credentials must never be committed
+.env
+.env.*
+*.pem
+*.key
+id_ed25519*
+id_rsa*
+*api_key*
+*api_token*

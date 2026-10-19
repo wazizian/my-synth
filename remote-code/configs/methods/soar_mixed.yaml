@@ -1,0 +1,22 @@
+{
+  "seed": 20261017,
+  "batch_size": 256,
+  "block_steps": 4,
+  "hidden_size": 64,
+  "learner_lr": 0.001,
+  "generator_lr": 0.001,
+  "kl_coefficient": 0.01,
+  "epsilon": 0.05,
+  "expert_coefficient": 1.0,
+  "monitor_interval_seconds": 180,
+  "checkpoint_interval_seconds": 300,
+  "selection_interval_seconds": 900,
+  "evaluation_batch_size": 256,
+  "checkpoint_policy": "lowest_balanced_selection_score",
+  "screen_seconds": 600,
+  "final_active_seconds": 2700,
+  "task": {},
+  "market": {},
+  "method": "soar_mixed",
+  "run_id": "soar_mixed-lr001"
+}

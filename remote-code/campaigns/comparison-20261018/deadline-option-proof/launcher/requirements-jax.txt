@@ -1,0 +1,1 @@
+# Stdlib-only control fixture; intentionally no numerical dependencies.

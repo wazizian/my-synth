@@ -1,0 +1,6 @@
+\section*{Scope of the option entropic scores}
+The option results compare finite-sample empirical log-mean-exp scores, with paired intervals conditional on fitted policies. They do not establish finite population entropic risk.
+Given the information before the final trading interval, the causal stock holding satisfies $0\le h\le1$. The large-stock-price tail of the call liability minus stock gains plus final liquidation costs has coefficient
+\[1-h+ch\ge c>0.\]
+All earlier cashflows are fixed conditional on that history. The final stock return is lognormal with positive variance, so a positive terminal-loss coefficient has an infinite positive exponential moment. The frozen daily model with positive costs therefore does not provide a finite untruncated population entropic objective; a finite test set nevertheless has a finite empirical score.
+CVaR, dispersion, costs and marked-error diagnostics are reported separately. There is no outcome-driven tail cap or redesign. The bounded-loss credit benchmark does not inherit this particular issue.

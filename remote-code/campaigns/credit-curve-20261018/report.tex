@@ -1,0 +1,75 @@
+\documentclass{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{longtable,graphicx}
+\begin{document}
+\title{Credit-curve economic pre-screen}\maketitle
+The frozen economic pre-screen found a common policy within the useful-gain tolerance on both targets. Stop before learned-specialist and adaptive training.
+\scriptsize
+\begin{longtable}{llrrrr}
+Domain & Policy & Entropic & CVaR95 & Daily SD & Cost \\
+\hline
+easy & unhedged & 0.258164 & 0.458833 & 0.005212 & 0.000000 \\
+easy & replenish\_0.5 & 0.048057 & 0.224092 & 0.002205 & 0.000446 \\
+easy & replenish\_1.0 & 0.009209 & 0.074680 & 0.001259 & 0.000893 \\
+easy & replace\_daily\_0.5 & 0.142537 & 0.320419 & 0.002195 & 0.111034 \\
+easy & replace\_daily\_1.0 & 0.243725 & 0.305622 & 0.001228 & 0.222067 \\
+easy & observable\_sensitivity & 0.112814 & 0.202587 & 0.006193 & 0.001949 \\
+ordinary & unhedged & 0.258252 & 0.457094 & 0.005270 & 0.000000 \\
+ordinary & replenish\_0.5 & 0.047511 & 0.222349 & 0.002212 & 0.000446 \\
+ordinary & replenish\_1.0 & 0.008178 & 0.059780 & 0.001231 & 0.000891 \\
+ordinary & replace\_daily\_0.5 & 0.142121 & 0.320557 & 0.002197 & 0.110823 \\
+ordinary & replace\_daily\_1.0 & 0.242720 & 0.285678 & 0.001196 & 0.221646 \\
+ordinary & observable\_sensitivity & 0.116231 & 0.195155 & 0.006073 & 0.002143 \\
+hard & unhedged & 0.260308 & 0.457609 & 0.005313 & 0.000000 \\
+hard & replenish\_0.5 & 0.048433 & 0.221929 & 0.002229 & 0.000445 \\
+hard & replenish\_1.0 & 0.007869 & 0.056445 & 0.001212 & 0.000890 \\
+hard & replace\_daily\_0.5 & 0.142953 & 0.320362 & 0.002221 & 0.110731 \\
+hard & replace\_daily\_1.0 & 0.242670 & 0.289682 & 0.001198 & 0.221462 \\
+hard & observable\_sensitivity & 0.103721 & 0.178915 & 0.006243 & 0.002085 \\
+base & unhedged & 0.258352 & 0.457213 & 0.005270 & 0.000000 \\
+base & replenish\_0.5 & 0.047585 & 0.222416 & 0.002213 & 0.000446 \\
+base & replenish\_1.0 & 0.008215 & 0.060481 & 0.001231 & 0.000891 \\
+base & replace\_daily\_0.5 & 0.142183 & 0.320549 & 0.002198 & 0.110829 \\
+base & replace\_daily\_1.0 & 0.242768 & 0.287175 & 0.001198 & 0.221658 \\
+base & observable\_sensitivity & 0.115472 & 0.194893 & 0.006088 & 0.002130 \\
+\end{longtable}
+\normalsize
+The model uses daily default timing, positive transformed OU factors, and custom daily-coupon par CDS. Executable quotes come from an informed dealer; the policy receives quotes and inventory, not factor labels. Quotes may reveal factor information. Ordinary is a component; base is the declared 5\% easy / 90\% ordinary / 5\% hard mixture. Results use positive discounted financed-bond loss per unit face. Daily dispersion includes absorbing zeros after default. Paired intervals resample whole episodes and describe evaluation noise for fixed diagnostic policies; they are not training-seed uncertainty. No learned policy has been trained in this pre-screen. Numerical refinement covers declared probe states, not a uniform continuous-time error bound. Full daily trade/cash/position records and paths are retained; full vintage traces are retained for eight representative paths and mean vintage surfaces for all paths. Source and deterministic rules permit reconstruction of the remaining vintage histories.
+
+\section{Validation and execution scope}
+All 39 GPU tests and all 18 exported-record audit cells passed. Production grids
+were 1201 by 1, 601 by 1, and 1201 by 801 for easy, ordinary and hard. The frozen
+pricing tolerance was 0.00005 per unit face; doubled-grid and widened-boundary
+checks passed on the declared probe lattice. This is not a uniform or
+continuous-time error certificate. Accounting retained its 1e-10 tolerance.
+
+The memory repair replaced duplicate maturity tensors with one preallocated
+float64 buffer. The failed run was preserved, and the recovery replay used the
+same seed and streams; it supplies no additional independent seed evidence.
+Local orchestration ended after the final computation/report, requiring recovery
+of exports and shutdown. The accompanying Markdown assessment and recovery
+records state the retained-artifact scope in full.
+
+The common replenishment rule had regret intervals [0,0] relative to the six-rule
+menu in both targets. This triggered the predeclared economic stop, not a claim
+of global optimality. Hard had lower residual diagnostics under this rule than
+easy. No learned-specialist, adaptive, confirmation or final-test stage was opened.
+
+Opening-trade turnover excludes final liquidation notional; reported costs
+include final liquidation. Daily variance uses ddof zero and absorbing zeros
+after default. Full daily trade/cash records and paths are retained; full vintage
+traces cover eight representative episodes, with mean surfaces over all episodes.
+There are no scientific neural checkpoints because training was not entered.
+After export verification, the user requested checkpoint cleanup; twenty small
+preflight checkpoints were removed with their hashes retained in the cleanup
+audit. Historical export manifests describe the state before that deletion.
+
+Provider-reported cost: \$1.344. All campaign instances are confirmed shut down.
+
+\clearpage
+\includegraphics[width=\linewidth]{figures/easy-risk.png}
+\includegraphics[width=\linewidth]{figures/hard-risk.png}
+\clearpage
+\includegraphics[width=\linewidth]{figures/hard-daily.png}
+
+\end{document}

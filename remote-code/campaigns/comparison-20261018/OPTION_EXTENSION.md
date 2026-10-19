@@ -1,0 +1,11 @@
+# Authorized full option comparison
+
+User authorization 2026-10-19: after learning that options had only baseline/easy/hard discovery runs, the user funded and requested all eight arms despite the failed gate. This is a new exploratory extension, not a correction to the original gate results or a passing benchmark claim.
+
+Namespace: `option-exploratory-20261019`. Deadline: 2026-10-19 18:00 UTC. Transaction cost: 3bp, selected by the original maximum-minimum confirmation lower-bound ranking applied to all three failed candidates. Freeze those development scales and all scientific sources before launch. All eight arms use the existing audited learner, shared initialization, three learning rates, and 1800 active seconds per LR. Baseline remains base-only; specialists use own domains; adaptive teachers have declared coverage. Policies receive causal stock price history, time and own holding only.
+
+Fresh provider wallet at11:22UTC: USD17.1374. Eight-arm listed training estimate USD7.1352 including setup/export overhead; final evaluation reserveUSD1.50 and artifact reserveUSD1.00. No other live scientific jobs. A single bounded short control-proof worker is additional overhead within the remaining margin. Wallet guard and per-worker runtime/deadline controls must run independently of SSH.
+
+Host free741MiB. Existing option logs are about1–2MiB per LR; final credit logs are smaller. Conservative24-log estimate48MiB; require first-LR worker-byte measurement and continued disk monitoring. Preserve full logs. Full self-play archives use the existing verified external volume/readback system. Evaluation packaging includes all per-LR development and monitor curves via trial_curves, omitting redundant raw-log embedding only. Do not change numerical sources or discard logs to meet package limits.
+
+Before scientific allocation: GPU proof of the narrowly scoped new deadline controls, updated admission hashes, fresh financial projection/token, durable recovery/watchdog/external exporter active. Preserve original reports, skip receipts and failed launcher logs. New final520 option stream has never been opened; freeze all new selected checkpoints and design before opening it once. Final reports must separate original failed gates from this explicitly authorized exploratory comparison.

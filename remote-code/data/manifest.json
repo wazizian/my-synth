@@ -1,0 +1,275 @@
+{
+  "pricing_hash": "6e1e7504f2dbea009ec883ed1d72c531848e282cb1322a4b605188d70c587725",
+  "market": {
+    "context_steps": 64,
+    "trading_steps": 20,
+    "substeps": 4,
+    "dt": 0.003968253968253968,
+    "call_strike": 1.05
+  },
+  "regimes": [
+    [
+      2.0,
+      0.04,
+      0.2,
+      -0.3
+    ],
+    [
+      2.0,
+      0.04,
+      0.2,
+      -0.8
+    ],
+    [
+      2.0,
+      0.04,
+      0.4,
+      -0.3
+    ],
+    [
+      2.0,
+      0.04,
+      0.4,
+      -0.8
+    ],
+    [
+      2.0,
+      0.04,
+      0.6,
+      -0.3
+    ],
+    [
+      2.0,
+      0.04,
+      0.6,
+      -0.8
+    ],
+    [
+      2.0,
+      0.09,
+      0.2,
+      -0.3
+    ],
+    [
+      2.0,
+      0.09,
+      0.2,
+      -0.8
+    ],
+    [
+      2.0,
+      0.09,
+      0.4,
+      -0.3
+    ],
+    [
+      2.0,
+      0.09,
+      0.4,
+      -0.8
+    ],
+    [
+      2.0,
+      0.09,
+      0.6,
+      -0.3
+    ],
+    [
+      2.0,
+      0.09,
+      0.6,
+      -0.8
+    ]
+  ],
+  "distributions": {
+    "base": [
+      0.027272727340459824,
+      0.027272727340459824,
+      0.027272727340459824,
+      0.699999988079071,
+      0.027272727340459824,
+      0.027272727340459824,
+      0.027272727340459824,
+      0.027272727340459824,
+      0.027272727340459824,
+      0.027272727340459824,
+      0.027272727340459824,
+      0.027272727340459824
+    ],
+    "easy": [
+      0.800000011920929,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915
+    ],
+    "hard": [
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.0181818176060915,
+      0.800000011920929
+    ]
+  },
+  "datasets": {
+    "feedback_easy": {
+      "path": "data/feedback_easy.npz",
+      "sha256": "2875db9aba903e8d1a18ce8e84a8cad82b24643333b9b59426ec53e21a7ab02d",
+      "count": 256,
+      "key": [
+        2319557313,
+        3837048523
+      ],
+      "role": "feedback",
+      "domain": "easy",
+      "id_min": 1100000,
+      "id_max": 1100255
+    },
+    "feedback_hard": {
+      "path": "data/feedback_hard.npz",
+      "sha256": "c7b5697bad610a298a8864b91cf29ac7da801a98271a0da61fc6f679ead003eb",
+      "count": 256,
+      "key": [
+        2491898376,
+        1098087321
+      ],
+      "role": "feedback",
+      "domain": "hard",
+      "id_min": 1200000,
+      "id_max": 1200255
+    },
+    "monitor_base": {
+      "path": "data/monitor_base.npz",
+      "sha256": "64d2e150e7ec03df2fa13ff7f1850dd433c376b3547977bc1f52f070eb06bcc0",
+      "count": 512,
+      "key": [
+        141443287,
+        4084656341
+      ],
+      "role": "monitor",
+      "domain": "base",
+      "id_min": 2000000,
+      "id_max": 2000511
+    },
+    "monitor_easy": {
+      "path": "data/monitor_easy.npz",
+      "sha256": "fbae20526055125ce9f6bc4c138b95727472a4481a4d41f950ca102eea39b968",
+      "count": 512,
+      "key": [
+        4140566573,
+        1125371795
+      ],
+      "role": "monitor",
+      "domain": "easy",
+      "id_min": 2100000,
+      "id_max": 2100511
+    },
+    "monitor_hard": {
+      "path": "data/monitor_hard.npz",
+      "sha256": "444c915e47d31543a4668ec53b9a3777cb27ec42d43796252c6ccde3f3253202",
+      "count": 512,
+      "key": [
+        126344498,
+        2624562085
+      ],
+      "role": "monitor",
+      "domain": "hard",
+      "id_min": 2200000,
+      "id_max": 2200511
+    },
+    "selection_base": {
+      "path": "data/selection_base.npz",
+      "sha256": "dbfd668b79eac92e0ceccaa1bf3ac086ee76a3b6ab1bc3c7b436d7c7a0c17505",
+      "count": 1024,
+      "key": [
+        1791973796,
+        3271136281
+      ],
+      "role": "selection",
+      "domain": "base",
+      "id_min": 3000000,
+      "id_max": 3001023
+    },
+    "selection_easy": {
+      "path": "data/selection_easy.npz",
+      "sha256": "747848a21619d59f4b155e8cba87ebb513eba96698feff587e665e018447a5eb",
+      "count": 1024,
+      "key": [
+        4127223937,
+        1949239161
+      ],
+      "role": "selection",
+      "domain": "easy",
+      "id_min": 3100000,
+      "id_max": 3101023
+    },
+    "selection_hard": {
+      "path": "data/selection_hard.npz",
+      "sha256": "9884e33dbf1e6747ef867ab33980e00e6130d133b0ffb872444532c8bfafe23a",
+      "count": 1024,
+      "key": [
+        1691470063,
+        1114543402
+      ],
+      "role": "selection",
+      "domain": "hard",
+      "id_min": 3200000,
+      "id_max": 3201023
+    },
+    "final_test_base": {
+      "path": "data/final_test_base.npz",
+      "sha256": "affb68efed9f1fc31c1d8e88c6e3be5bf9af76f3957cd08ae34121496a9bcaec",
+      "count": 8192,
+      "key": [
+        1133485314,
+        919017717
+      ],
+      "role": "final_test",
+      "domain": "base",
+      "id_min": 4000000,
+      "id_max": 4008191
+    },
+    "final_test_easy": {
+      "path": "data/final_test_easy.npz",
+      "sha256": "bdc836224da3c0428f5ff422c808e801faf7e546e52967f359c07f6862c90baa",
+      "count": 8192,
+      "key": [
+        3197418649,
+        2810506673
+      ],
+      "role": "final_test",
+      "domain": "easy",
+      "id_min": 4100000,
+      "id_max": 4108191
+    },
+    "final_test_hard": {
+      "path": "data/final_test_hard.npz",
+      "sha256": "dbb1a302def1753b0cc9cd3b118a49c3c6c4b43630ae5e041af8f1bf9eca7875",
+      "count": 8192,
+      "key": [
+        1045676305,
+        2998938486
+      ],
+      "role": "final_test",
+      "domain": "hard",
+      "id_min": 4200000,
+      "id_max": 4208191
+    }
+  },
+  "benchmark_hash": "9cc8a0f4b0fbcd2883af0bee778351ce4d127ecdc1ba51f98557b1cbbb92117e",
+  "objective_scales_hash": "68a7c11f58d73482531119c6642541b295deab38ab6b8f9c06b147e42bd84d01"
+}

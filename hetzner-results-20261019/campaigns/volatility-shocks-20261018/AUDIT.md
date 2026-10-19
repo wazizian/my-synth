@@ -1,0 +1,5 @@
+Source review: exact OU transitions; stock uses pre-transition factors; rolling RV uses strictly past returns; conditional call formula valid for independent stock/factor innovations. Imposed jump is correctly disclosed as diagnostic intervention. Source and uploaded reference preserved unchanged. Worker reproduction pending. Original dependency range JAX<0.8 is replaced only for the managed worker by proven pinned JAX0.11.2; actual resolved versions retained.
+
+GPU reproduction passed, source SHA256 f15fc85c8fcd343bcfaf721ebf59decfd3296798b29236fdbe9412e66c698ff3, maximum reference discrepancy 6.66e-16. Final sync complete, manifest includes audit.json and diagnostic artifacts; API-confirmed instance destruction56609467. Failed startup56603812 and interrupted allocation56603656 were also confirmed destroyed.
+
+20:48UTC: first stochastic diagnostic passed all checks except base126 quote SE .000109858 > .0001. Increase independent pricing draws from16384 to65536 per replicate (8replicates), retain thresholds/model and failed artifacts. No training had started.

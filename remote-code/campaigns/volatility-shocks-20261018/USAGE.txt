@@ -1,0 +1,1 @@
+2026-10-18 recovery: model.py now writes atomic full model/Adam/PRNG/training-boundary state and verifies development replay when resumed. Current live baseline/easy payloads remain unchanged; source-only resume extension applies to future packaged jobs. Worker numerical validation must run on GPU. supervise.py now matches active instance to metadata when displaying progress.

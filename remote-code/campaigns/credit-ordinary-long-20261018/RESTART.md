@@ -1,0 +1,5 @@
+Restart 2026-10-18: prior runs stopped after SSH disconnections and stdout BrokenPipeError. Preserve original runs and complete1bp selected checkpoints. Replay and continue interrupted3bp trials with model/Adam/PRNG state from last complete active-time boundary; skip completed LR trials; later10bp trials unchanged. Warm compilation does not consume a resumed optimizer step. Checkpoint score replay tolerance1e-10. Independent confirmation remains unopened. Same market, baseline ordinary-only distribution, seeds, architecture, objective, costs and1800s active budget.
+
+Campaign launcher now detaches the numerical process with file-backed stdout, remote timeout and atomic exit marker. SSH polls retry without restarting numerical work. Incremental sync/final inventory/API-confirmed cleanup retained. Detailed remote stdout is outputs/workload.log.
+
+See restart-*-manifest.json, restart-*-launcher.log, and ../live_monitor.latest.json. Training process allocated is not evidence of gradient updates; require new train.jsonl records and resume.json.
