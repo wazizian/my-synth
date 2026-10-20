@@ -24,13 +24,14 @@ if jax.default_backend() != "gpu":
     raise RuntimeError("Explicit neural-SDE validation requires a GPU backend")
 
 from neural_sde_hedging.config import SDEConfig
+from neural_sde_hedging import training as training_module
 from neural_sde_hedging import credit, credit_continuous
 from neural_sde_hedging.dynamics import (NeuralSDE, SDEPaths, path_log_prob,
                                          sample_noise, simulate,
                                          transition_coefficients,
                                          transition_log_prob)
 from neural_sde_hedging.hedger import Contract, Hedger, terminal_losses
-from neural_sde_hedging.hard_regime import sample_hard
+from neural_sde_hedging.hard_regime import sample_hard, sample_regime
 from neural_sde_hedging.methods import (pathwise_meta_learning, dpg_attributions, selfplay_objective,
                                        selfplay_rewards, soar_branches)
 from neural_sde_hedging.replay import ProgramBank, build_pool
@@ -563,20 +564,23 @@ def test_gaussian_fit_loss_uses_every_transition_and_log_determinant(small_model
 
 
 @pytest.mark.parametrize("problem", ["options", "credit"])
-def test_hard_sampler_matches_reference(problem):
+@pytest.mark.parametrize("regime", ["easy", "hard"])
+def test_hard_sampler_matches_reference(problem, regime):
     """Check the fixed hard law, persistent day-35 shock and fresh independent draws."""
     config = SDEConfig(n_steps=40) if problem == "options" else credit_continuous.CreditSDEConfig(n_steps=40)
     key, batch = jax.random.key(210), 4
-    actual = sample_hard(key, batch, config, problem)
+    actual = sample_regime(key, batch, config, problem, regime)
     noise = np.asarray(jax.random.normal(key, (config.n_steps, batch, config.state_dim)))
     decay = np.exp(-np.log(2.)/np.asarray((40., 3.) if problem == "options" else (40.,)))
+    if regime == "easy":
+        decay = np.exp(-np.log(2.)/np.full_like(decay, 3.))
     sd = .35*np.sqrt(config.dt*(1-decay**2)/(-2*np.log(decay)))
     state = np.zeros((batch, config.state_dim))
     if problem == "credit":
         state[:, 0] = config.initial_latent
     expected = [state.copy()]
     for day, z in enumerate(noise):
-        shock = np.log(2.) if day == 35 else 0.
+        shock = np.log(2.) if day == 35 and regime == "hard" else 0.
         if problem == "options":
             factors = state[:, 1:] + shock
             variance = .04*np.exp(np.sum(factors, axis=1))
@@ -586,17 +590,23 @@ def test_hard_sampler_matches_reference(problem):
             state = config.initial_latent + (state-config.initial_latent+shock)*decay + sd*z
         expected.append(state.copy())
     np.testing.assert_allclose(actual, np.stack(expected, axis=1), rtol=2e-5, atol=2e-6)
-    np.testing.assert_array_equal(actual, sample_hard(key, batch, config, problem))
-    fresh = sample_hard(jax.random.fold_in(key, 1), batch, config, problem)
+    np.testing.assert_array_equal(actual, sample_regime(key, batch, config, problem, regime))
+    if regime == "hard":
+        np.testing.assert_array_equal(actual, sample_hard(key, batch, config, problem))
+    fresh = sample_regime(jax.random.fold_in(key, 1), batch, config, problem, regime)
     assert not np.array_equal(actual[:, 1:], fresh[:, 1:])
 
 
 @pytest.mark.parametrize("problem", ["options", "credit"])
-@pytest.mark.parametrize("method", ["dpg", "soar", "hard-specialist"])
+@pytest.mark.parametrize("method", ["dpg", "soar", "hard-specialist", "easy-specialist"])
 def test_hard_target_pool_fresh_evaluation_and_specialist(tmp_path, monkeypatch, problem, method):
     """Exercise shared fixed-pool targets, fresh hard evaluation and resumed RNG on GPU."""
-    monkeypatch.setenv("NEURAL_SDE_ENABLED", "1")
-    args = SimpleNamespace(method=method, target_regime="hard", hard_pool_size=8,
+    if method.endswith("-specialist"):
+        monkeypatch.delenv("NEURAL_SDE_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("NEURAL_SDE_ENABLED", "1")
+    regime = "easy" if method == "easy-specialist" else "hard"
+    args = SimpleNamespace(method=method, target_regime=None, hard_pool_size=8,
                            problem=problem, credit_simulation="continuous", cds_days=2,
                            credit_grid_size=31, output=str(tmp_path / method), seconds=600.,
                            rounds=2, seed=20261017, groups=2, items=2, inner_steps=1,
@@ -608,14 +618,21 @@ def test_hard_target_pool_fresh_evaluation_and_specialist(tmp_path, monkeypatch,
     run(args)
     out = tmp_path / method
     state = load_checkpoint(out / "latest.pkl")
-    assert state["feedback_hash"] == "fixed-hard-training-pool-v1"
-    assert state["validation_hash"] == "fresh-hard-target-v1"
-    expected = jax.random.key_data(jax.random.fold_in(jax.random.key(args.seed+102), 1))
+    assert state["feedback_hash"] == f"fixed-{regime}-training-pool-v1"
+    assert state["validation_hash"] == f"fresh-{regime}-target-v1"
+    expected = jax.random.key_data(jax.random.fold_in(jax.random.key(args.seed+(102 if regime == "hard" else 104)), 1))
     np.testing.assert_array_equal(state["last_validation_key_data"], expected)
     rows = [json.loads(row) for row in (out / "progress.jsonl").read_text().splitlines()]
     assert len(rows) == 2
     assert all(row["validation_sample_size"] == 8 for row in rows)
-    if method == "hard-specialist":
+    for evaluated, offset in (("hard", 102), ("easy", 104)):
+        assert all(row[f"evaluation_{evaluated}_sample_size"] == 8 for row in rows)
+        first_key = jax.random.key_data(jax.random.fold_in(jax.random.key(args.seed+offset), 0))
+        last_key = jax.random.key_data(jax.random.fold_in(jax.random.key(args.seed+offset), 1))
+        assert not np.array_equal(first_key, last_key)
+        np.testing.assert_array_equal(state[f"last_{evaluated}_validation_key_data"], last_key)
+    assert all(row["validation_entropic"] == row[f"evaluation_{regime}_entropic"] for row in rows)
+    if method.endswith("-specialist"):
         assert all(row["teacher_gradient_norm"] == 0 for row in rows)
         if problem == "options":
             initial = Hedger(jax.random.key(args.seed))
@@ -630,3 +647,54 @@ def test_hard_target_pool_fresh_evaluation_and_specialist(tmp_path, monkeypatch,
     resumed = load_checkpoint(out / "latest.pkl")
     np.testing.assert_array_equal(state["key_data"], resumed["key_data"])
     np.testing.assert_array_equal(state["last_validation_key_data"], resumed["last_validation_key_data"])
+
+
+@pytest.mark.parametrize("method", ["easy-specialist", "hard-specialist"])
+def test_specialist_rejects_external_pool(tmp_path, method, monkeypatch):
+    """Reject relabeling arbitrary supplied paths as a built-in specialist regime."""
+    monkeypatch.delenv("NEURAL_SDE_ENABLED", raising=False)
+    args = SimpleNamespace(method=method, target_regime=None, feedback_paths="arbitrary.npz")
+    with pytest.raises(ValueError, match="generated regime pool"):
+        run(args)
+
+
+@pytest.mark.parametrize("method", ["easy-specialist", "hard-specialist"])
+def test_specialist_interrupted_resume_matches_uninterrupted(tmp_path, monkeypatch, method):
+    """Reconstruct the fixed regime pool after interruption and reproduce the final learner."""
+    monkeypatch.delenv("NEURAL_SDE_ENABLED", raising=False)
+    args = SimpleNamespace(method=method, target_regime=None, hard_pool_size=8,
+                           problem="options", credit_simulation="continuous", cds_days=2,
+                           credit_grid_size=31, output=str(tmp_path / "interrupted"), seconds=600.,
+                           rounds=2, seed=20261017, groups=2, items=2, inner_steps=1,
+                           n_steps=3, gamma=10., student_lr=3e-4, teacher_lr=1e-3,
+                           warmup_steps=2, weight_decay=.01, promotion_threshold=1e-4,
+                           feedback_paths=None, feedback_size=4, validation_paths=None,
+                           validation_size=8, validation_every=1, entropic_ess_fraction=.1,
+                           payoff_cap=.5, premium=0., min_free_gb=.01)
+    original_save = training_module.atomic_checkpoint
+
+    def save_then_interrupt(path, payload):
+        """Persist one completed round, then simulate a process failure before its log append."""
+        original_save(path, payload)
+        if path.name == "latest.pkl" and payload.get("round_index") == 1:
+            raise RuntimeError("simulated interruption")
+
+    monkeypatch.setattr(training_module, "atomic_checkpoint", save_then_interrupt)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        run(args)
+    interrupted = load_checkpoint(tmp_path / "interrupted" / "latest.pkl")
+    assert interrupted["round_index"] == 1
+    monkeypatch.setattr(training_module, "atomic_checkpoint", original_save)
+    run(args)
+    resumed = load_checkpoint(tmp_path / "interrupted" / "latest.pkl")
+    args.output = str(tmp_path / "uninterrupted")
+    run(args)
+    reference = load_checkpoint(tmp_path / "uninterrupted" / "latest.pkl")
+    assert resumed["round_index"] == reference["round_index"] == 2
+    assert resumed["feedback_hash"] == reference["feedback_hash"]
+    np.testing.assert_array_equal(resumed["key_data"], reference["key_data"])
+    for regime in ("easy", "hard"):
+        np.testing.assert_array_equal(resumed[f"last_{regime}_validation_key_data"],
+                                      reference[f"last_{regime}_validation_key_data"])
+    for actual, expected in zip(jax.tree.leaves(resumed["student"]), jax.tree.leaves(reference["student"])):
+        np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=2e-7)

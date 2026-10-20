@@ -29,7 +29,7 @@ from .checkpoint_codec import CheckpointPickler
 from .config import SDEConfig
 from .dynamics import NeuralSDE, path_log_prob, sample_noise, simulate
 from .hedger import Contract, Hedger, terminal_losses
-from .hard_regime import sample_hard
+from .hard_regime import sample_regime
 from .methods import (pathwise_meta_learning, dpg_attributions, grpo_objective, promote_soar,
                       selfplay_objective, selfplay_rewards, soar_branches,
                       soar_teacher_objective)
@@ -175,18 +175,22 @@ def teacher_loss(params, static, pool, config, method, behavior, reference,
 
 def run(args):
     """Run one method/initialization on GPU; resume every learner/teacher/RNG state."""
-    if args.method != "hard-specialist":
+    if args.method not in ("hard-specialist", "easy-specialist"):
         require_enabled()
     if jax.default_backend() != "gpu":
         raise RuntimeError("Only Ruff and py_compile are authorized locally; training requires GPU")
-    args.target_regime = getattr(args, "target_regime", "hard")
+    args.target_regime = getattr(args, "target_regime", None) or (
+        "easy" if args.method == "easy-specialist" else "hard")
     args.hard_pool_size = getattr(args, "hard_pool_size", 1024)
-    if args.target_regime not in ("hard", "prior", "external"):
+    if args.target_regime not in ("easy", "hard", "prior", "external"):
         raise ValueError("Unknown target regime")
-    if args.method == "hard-specialist" and args.target_regime != "hard":
-        raise ValueError("hard-specialist requires the hard target law")
-    if args.target_regime == "hard" and getattr(args, "validation_paths", None):
-        raise ValueError("Hard evaluation uses fresh simulations; omit --validation-paths")
+    if args.method in ("hard-specialist", "easy-specialist"):
+        if args.target_regime != args.method.removesuffix("-specialist"):
+            raise ValueError("Specialist must use its matching easy/hard target law")
+        if getattr(args, "feedback_paths", None):
+            raise ValueError("Specialists use their generated regime pool; omit --feedback-paths")
+    if args.target_regime in ("easy", "hard") and getattr(args, "validation_paths", None):
+        raise ValueError("Easy/hard evaluation uses fresh simulations; omit --validation-paths")
     if args.target_regime == "external" and not (args.feedback_paths and args.validation_paths):
         raise ValueError("External targets require feedback and independent validation files")
     args.hard_paths = getattr(args, "hard_paths", None)
@@ -211,8 +215,8 @@ def run(args):
             args.feedback_paths = args.hard_paths
         if min(args.fit_steps, args.fit_batch_size) < 1:
             raise ValueError("Positive fit steps and batch size required")
-    if args.target_regime == "hard" and args.problem == "credit" and args.credit_simulation != "continuous":
-        raise ValueError("Hard credit target requires continuous credit simulation")
+    if args.target_regime in ("easy", "hard") and args.problem == "credit" and args.credit_simulation != "continuous":
+        raise ValueError("Easy/hard credit targets require continuous credit simulation")
     if args.n_steps is None:
         args.n_steps = 1260 if args.problem == "credit" else 126
     # Defaults keep programmatic callers compatible; persist them in the fingerprint.
@@ -224,7 +228,7 @@ def run(args):
         raise ValueError("Feedback/validation sizes and interval must be positive")
     if not 0 < args.entropic_ess_fraction <= 1:
         raise ValueError("Entropic ESS fraction must lie in (0,1]")
-    if args.feedback_paths and not args.validation_paths and args.target_regime != "hard":
+    if args.feedback_paths and not args.validation_paths and args.target_regime not in ("easy", "hard"):
         raise ValueError("External feedback requires a separate --validation-paths file")
     began = time.monotonic()
     if args.seconds <= 0 or args.rounds < 1 or args.groups < 2 or args.items < 2 or args.inner_steps < 1:
@@ -307,7 +311,8 @@ def run(args):
     history = out / "learner-history"
     history.mkdir(exist_ok=True)
     # One immutable hard training pool; per-round subsets and evaluation RNG are separate.
-    compiled_hard = eqx.filter_jit(lambda key, batch: sample_hard(key, batch, config, args.problem))
+    compiled_regime = eqx.filter_jit(
+        lambda key, batch, regime: sample_regime(key, batch, config, args.problem, regime))
     # Only target-training data may feed teacher rewards. Validation is disjoint.
     feedback_population = None
     feedback_hash = "fresh-neural-sde-prior-demonstration"
@@ -319,17 +324,18 @@ def run(args):
         chex.assert_shape(feedback_population, (feedback_population.shape[0], config.n_steps + 1, config.state_dim))
         if feedback_population.shape[0] < args.feedback_size:
             raise ValueError("Feedback population smaller than the requested batch")
-    if args.target_regime == "hard":
+    if args.target_regime in ("easy", "hard"):
         if feedback_population is None:
             if args.hard_pool_size < max(args.feedback_size, args.groups*args.items):
-                raise ValueError("Hard pool must cover feedback and specialist batches")
-            feedback_population = compiled_hard(jax.random.key(args.seed + 101), args.hard_pool_size)
-            feedback_hash = "fixed-hard-training-pool-v1"
+                raise ValueError("Regime pool must cover feedback and specialist batches")
+            pool_seed = args.seed + (101 if args.target_regime == "hard" else 103)
+            feedback_population = compiled_regime(jax.random.key(pool_seed), args.hard_pool_size, args.target_regime)
+            feedback_hash = f"fixed-{args.target_regime}-training-pool-v1"
         if feedback_population.shape[0] < max(args.feedback_size, args.groups*args.items):
-            raise ValueError("Hard pool too small")
+            raise ValueError("Regime pool too small")
         if not bool(jnp.all(jnp.isfinite(feedback_population))):
-            raise ValueError("Hard pool must be finite")
-        validation_hash = "fresh-hard-target-v1"
+            raise ValueError("Regime pool must be finite")
+        validation_hash = f"fresh-{args.target_regime}-target-v1"
         validation_states = None
     elif args.validation_paths:
         validation_file = Path(args.validation_paths)
@@ -513,7 +519,7 @@ def run(args):
         teacher = eqx.combine(state["teacher"], teacher_static)
         student_before = state["student"]
         metrics = {}
-        if args.method == "hard-specialist":
+        if args.method in ("hard-specialist", "easy-specialist"):
             batch = args.groups * args.items
             indices = jax.random.choice(draw_key, feedback_population.shape[0], (batch,), replace=False)
             chex.assert_shape(indices, (batch,))
@@ -587,7 +593,7 @@ def run(args):
 
             apply_teacher = args.method not in ("baseline", "fitted-sde")
             mutation_mask = jnp.zeros((batch,), dtype=bool)
-        if args.method in ("baseline", "fitted-sde", "hard-specialist"):
+        if args.method in ("baseline", "fitted-sde", "hard-specialist", "easy-specialist"):
             objective_value, teacher_metrics, gradient = jnp.array(0.), {}, ()
             candidate_teacher = state["teacher"]
             new_teacher_optimizer = state["teacher_optimizer"]
@@ -606,19 +612,26 @@ def run(args):
         target_risk = compiled_target(student, feedback_states)
         measured_feedback = compiled_metrics(student, feedback_states)
         measured_validation = {}
+        measured_regimes = {}
         elapsed = resumed_seconds + time.monotonic() - began
         if ((round_index + 1) % args.validation_every == 0
                 or round_index + 1 >= args.rounds or elapsed >= args.seconds):
-            if args.target_regime == "hard":
-                evaluation_key = jax.random.fold_in(jax.random.key(args.seed + 102), round_index)
-                fresh_validation = compiled_hard(evaluation_key, args.validation_size)
-                state["last_validation_key_data"] = jax.random.key_data(evaluation_key)
-                measured_validation = compiled_metrics(student, fresh_validation)
+            if args.target_regime in ("easy", "hard"):
+                for regime, offset in (("hard", 102), ("easy", 104)):
+                    evaluation_key = jax.random.fold_in(jax.random.key(args.seed + offset), round_index)
+                    fresh_validation = compiled_regime(evaluation_key, args.validation_size, regime)
+                    regime_metrics = compiled_metrics(student, fresh_validation)
+                    measured_regimes |= {f"evaluation_{regime}_" + name: value
+                                         for name, value in regime_metrics.items()}
+                    state[f"last_{regime}_validation_key_data"] = jax.random.key_data(evaluation_key)
+                    if regime == args.target_regime:
+                        state["last_validation_key_data"] = jax.random.key_data(evaluation_key)
+                        measured_validation = regime_metrics
             else:
                 measured_validation = compiled_metrics(student, validation_states)
         for value in jax.tree.leaves((student, candidate_teacher, new_teacher_optimizer, objective_value,
                                      teacher_metrics, gradient, rewards, behavior, reference, pool.states,
-                                     target_risk, measured_feedback, measured_validation)):
+                                     target_risk, measured_feedback, measured_validation, measured_regimes)):
             if not bool(jax.device_get(jnp.all(jnp.isfinite(value)))):
                 raise RuntimeError("Nonfinite update; previous checkpoint preserved")
         state["student"] = jax.tree.map(jax.lax.stop_gradient, student)
@@ -636,6 +649,7 @@ def run(args):
                                       "round": state["round_index"], "seconds": state["seconds"]}
         metrics |= {"feedback_" + name: value for name, value in measured_feedback.items()}
         metrics |= {"validation_" + name: value for name, value in measured_validation.items()}
+        metrics |= measured_regimes
         atomic_checkpoint(latest, state)
         with (out / "progress.jsonl").open("a") as stream:
             stream.write(json.dumps({name: float(jax.device_get(value)) for name, value in metrics.items()}, allow_nan=False) + "\n")
@@ -647,7 +661,7 @@ def run(args):
 def main():
     """Parse one-seed GPU job configuration and run the selected teacher method."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde", "hard-specialist"), required=True)
+    parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde", "hard-specialist", "easy-specialist"), required=True)
     parser.add_argument("--problem", choices=("options", "credit"), default="options")
     parser.add_argument("--cds-days", type=int, default=126)
     parser.add_argument("--credit-grid-size", type=int, default=601)
@@ -666,8 +680,9 @@ def main():
     parser.add_argument("--warmup-steps", type=int, default=32)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--promotion-threshold", type=float, default=0.0001)
-    parser.add_argument("--target-regime", choices=("hard", "prior", "external"), default="hard")
-    parser.add_argument("--hard-pool-size", type=int, default=1024)
+    parser.add_argument("--target-regime", choices=("easy", "hard", "prior", "external"),
+                        help="Default: hard; easy for easy-specialist")
+    parser.add_argument("--hard-pool-size", "--regime-pool-size", dest="hard_pool_size", type=int, default=1024)
     parser.add_argument("--hard-paths", help="Full-state hard training NPZ; fitted-sde only")
     parser.add_argument("--fit-steps", type=int, default=1000)
     parser.add_argument("--fit-batch-size", type=int, default=32)

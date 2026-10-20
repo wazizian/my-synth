@@ -2,7 +2,7 @@
 
 **Neural teacher paused:** neural-SDE fitting, hyperparameter studies, readouts, and
 campaign launches are disabled by default; neural teacher training also requires opt-in.
-The non-neural `hard-specialist` arm is available. Source is retained for future work.
+The non-neural `hard-specialist` and `easy-specialist` arms are available. Source is retained for future work.
 Explicitly setting `NEURAL_SDE_ENABLED=1` re-enables these entry points; this does
 not authorize a GPU rental. Cleanup/export/watchdog operations remain available.
 The price-only fitting change is pending: the retained fitted-SDE implementation
@@ -12,13 +12,16 @@ still uses full simulator states. No new numerical validation has been run.
 This is the editable implementation. `../remote-code/` is a separately hashed,
 snapshot of historical Hetzner code. Current training uses this package; old campaigns are evidence only.
 
-## Hard targets restored
+## Easy and hard benchmarks restored
 
 The default downstream target is the fixed persistent-shock **hard regime**,
 with 1,024 static training paths and 128 resampled feedback paths per iteration.
-Evaluation simulates 2,048 fresh hard paths at each evaluation point. DPG and
+Evaluation simulates 2,048 fresh paths from each of easy and hard at each evaluation point. DPG and
 SOAR optimize against the hard subset; `hard-specialist` trains directly on
 that same static hard pool with the same learner architecture and initialization.
+`easy-specialist` trains on a separate static easy pool using the original
+no-shock options dynamics. It uses the same learner settings and automatically
+selects easy as its training regime. Both specialists are evaluated on both regimes.
 See [HARD_REGIME.md](HARD_REGIME.md) for exact laws, limitations and commands.
 This supersedes older descriptions below of fresh neural-prior feedback and
 fixed validation. The price-only fitted-SDE change remains pending.
@@ -106,8 +109,8 @@ claim to reproduce their text-generation benchmarks or convergence theorems.
 
 The adaptive arms generate synthetic learner data through the problem's neural
 SDE (`NeuralSDE` for options, `NeuralCredit` for credit). The fixed-prior control
-samples the initial neural model. The hard specialist instead trains directly on
-fixed hard-regime paths. The target law is separate from the generator.
+samples the initial neural model. The specialists instead train directly on
+fixed paths from their respective easy or hard regimes. The target law is separate from the generator.
 
 By default, generate **1,024 fixed hard training paths**, then sample **128**
 without replacement per round. DPG, SOAR and pathwise meta-learning share that
@@ -115,8 +118,8 @@ subset across all within-round downstream comparisons. Self-play's alignment
 reward remains defined on its generated round pool. Feedback subset randomness
 is checkpointed; the fixed hard pool is regenerated deterministically on resume.
 
-Each evaluation uses **2,048 freshly simulated hard paths** from a separate RNG
-namespace. Evaluate every **16 rounds**, at the last requested round, and when a
+Each evaluation uses **2,048 freshly simulated paths per regime**, easy and
+hard, from separate RNG namespaces. Evaluate every **16 rounds**, at the last requested round, and when a
 completed round exhausts the soft time budget. Matching rounds use common draws
 across methods. Evaluation never enters teacher rewards. A separate final test
 protocol remains required for scientific comparisons.

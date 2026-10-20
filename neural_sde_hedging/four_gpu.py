@@ -254,8 +254,8 @@ def launch(args):
     root = Path(args.output).resolve()
     if root.exists():
         raise ValueError("Use a new output directory for each campaign")
-    if args.target_regime == "hard" and args.validation_paths:
-        raise ValueError("Hard evaluation samples fresh paths; omit --validation-paths")
+    if args.target_regime in ("easy", "hard") and args.validation_paths:
+        raise ValueError("Easy/hard evaluation samples fresh paths; omit --validation-paths")
     cleanup_argv = json.loads(args.cleanup_argv)
     if not isinstance(cleanup_argv, list) or not cleanup_argv or not all(
         isinstance(value, str) and value for value in cleanup_argv
@@ -314,7 +314,7 @@ def launch(args):
     shutil.copy2(source.parent / "tests/test_neural_sde_gpu.py", code / "tests")
     feedback = None
     validation = None
-    if args.target_regime != "hard" and bool(args.feedback_paths) != bool(args.validation_paths):
+    if args.target_regime not in ("easy", "hard") and bool(args.feedback_paths) != bool(args.validation_paths):
         raise ValueError("Provide both feedback and validation path files, or neither")
     if args.validation_paths:
         validation = root / "validation.npz"
@@ -366,7 +366,7 @@ def main():
     command.add_argument("--min-free-gb", type=float, default=10.)
     command.add_argument("--max-artifact-gb", type=float, default=10.)
     command.add_argument("--export-interval", type=float, default=60.)
-    command.add_argument("--target-regime", choices=("hard", "prior", "external"), default="hard")
+    command.add_argument("--target-regime", choices=("easy", "hard", "prior", "external"), default="hard")
     command.add_argument("--feedback-paths")
     command.add_argument("--problem", choices=("options", "credit"), default="options")
     command.add_argument("--credit-simulation", choices=("continuous", "grid"), default="continuous")

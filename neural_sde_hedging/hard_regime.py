@@ -1,4 +1,4 @@
-"""Fixed, non-neural persistent-shock target law, separate from teacher proposals."""
+"""Fixed non-neural easy/no-shock and hard/persistent-shock benchmark laws."""
 
 import math
 
@@ -7,14 +7,17 @@ import jax
 import jax.numpy as jnp
 
 
-def sample_hard(key, batch, config, problem):
-    """Return hard target states [B,T+1,D] from key, dimensions and problem.
+def sample_regime(key, batch, config, problem, regime):
+    """Return regime states [B,T+1,D] from key, dimensions, problem and easy/hard label.
 
     Options restore the diagnostic's physical half-lives (40,3) days, eta .35,
     20% base volatility and two log(2) shocks at day 35. Credit uses a one-factor
     persistent positive-hazard analogue; it is not the historical two-factor
-    credit-curve benchmark. Neither law's economic difficulty is certified.
+    credit-curve benchmark. Easy has no shock and three-day factor half-lives.
+    The easy/hard economic difficulty ordering is not certified.
     """
+    if regime not in ("easy", "hard"):
+        raise ValueError("Regime must be easy or hard")
     n_steps, dim = config.n_steps, config.state_dim
     if problem not in ("options", "credit"):
         raise ValueError("Unknown hard target problem")
@@ -25,6 +28,8 @@ def sample_hard(key, batch, config, problem):
     chex.assert_shape(noise, (n_steps, batch, dim))
     n_factors = 2 if problem == "options" else 1
     half_lives = jnp.asarray((40., 3.) if problem == "options" else (40.,))
+    if regime == "easy":
+        half_lives = jnp.full((n_factors,), 3.)
     chex.assert_shape(half_lives, (n_factors,))
     decay = jnp.exp(-math.log(2.) / half_lives)
     chex.assert_shape(decay, (n_factors,))
@@ -41,7 +46,7 @@ def sample_hard(key, batch, config, problem):
     def step(state, inputs):
         """Advance a daily state [B,D] with a fixed shock and independent Gaussian noise."""
         day, z = inputs
-        shock = jnp.where(day == 35, math.log(2.), 0.)
+        shock = jnp.where((day == 35) & (regime == "hard"), math.log(2.), 0.)
         chex.assert_shape(shock, ())
         if problem == "options":
             factors = state[:, 1:] + shock
@@ -67,3 +72,8 @@ def sample_hard(key, batch, config, problem):
     result = jnp.concatenate((initial[:, None, :], future), axis=1)
     chex.assert_shape(result, (batch, n_steps+1, dim))
     return result
+
+
+def sample_hard(key, batch, config, problem):
+    """Return hard states [B,T+1,D] from key, batch, simulator config and problem."""
+    return sample_regime(key, batch, config, problem, "hard")
