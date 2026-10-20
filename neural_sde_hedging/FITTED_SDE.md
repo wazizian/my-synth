@@ -39,7 +39,7 @@ Example on an already provisioned GPU:
 
 ```bash
 python -m neural_sde_hedging.training \
-  --method fitted-sde --problem options --output runs/options-fitted \
+  --method fitted-sde --target-regime external --problem options --output runs/options-fitted \
   --hard-paths data/hard-train.npz --validation-paths data/hard-validation.npz \
   --fit-steps 1000 --fit-batch-size 32 --teacher-lr 0.001 \
   --seconds 3600 --rounds 1000

@@ -1,5 +1,11 @@
 # Autonomous four-H100 pilot
 
+Current target default: fixed hard training pool, resampled feedback subsets,
+and fresh hard evaluation. See [HARD_REGIME.md](HARD_REGIME.md). The specialist
+is a separate fifth arm, run independently of this four-arm launcher. The old
+hyperparameter-study helper explicitly keeps its historical prior target and
+must not be used as validation of the restored hard-target protocol.
+
 Run this **on the allocated GPU node**, from the project root using the GPU
 Python environment. It does not rent a machine or install dependencies.
 No campaign was launched while writing this launcher.

@@ -29,6 +29,7 @@ from .checkpoint_codec import CheckpointPickler
 from .config import SDEConfig
 from .dynamics import NeuralSDE, path_log_prob, sample_noise, simulate
 from .hedger import Contract, Hedger, terminal_losses
+from .hard_regime import sample_hard
 from .methods import (pathwise_meta_learning, dpg_attributions, grpo_objective, promote_soar,
                       selfplay_objective, selfplay_rewards, soar_branches,
                       soar_teacher_objective)
@@ -174,9 +175,20 @@ def teacher_loss(params, static, pool, config, method, behavior, reference,
 
 def run(args):
     """Run one method/initialization on GPU; resume every learner/teacher/RNG state."""
-    require_enabled()
+    if args.method != "hard-specialist":
+        require_enabled()
     if jax.default_backend() != "gpu":
         raise RuntimeError("Only Ruff and py_compile are authorized locally; training requires GPU")
+    args.target_regime = getattr(args, "target_regime", "hard")
+    args.hard_pool_size = getattr(args, "hard_pool_size", 1024)
+    if args.target_regime not in ("hard", "prior", "external"):
+        raise ValueError("Unknown target regime")
+    if args.method == "hard-specialist" and args.target_regime != "hard":
+        raise ValueError("hard-specialist requires the hard target law")
+    if args.target_regime == "hard" and getattr(args, "validation_paths", None):
+        raise ValueError("Hard evaluation uses fresh simulations; omit --validation-paths")
+    if args.target_regime == "external" and not (args.feedback_paths and args.validation_paths):
+        raise ValueError("External targets require feedback and independent validation files")
     args.hard_paths = getattr(args, "hard_paths", None)
     args.fit_steps = getattr(args, "fit_steps", 1000)
     args.fit_batch_size = getattr(args, "fit_batch_size", 32)
@@ -199,6 +211,8 @@ def run(args):
             args.feedback_paths = args.hard_paths
         if min(args.fit_steps, args.fit_batch_size) < 1:
             raise ValueError("Positive fit steps and batch size required")
+    if args.target_regime == "hard" and args.problem == "credit" and args.credit_simulation != "continuous":
+        raise ValueError("Hard credit target requires continuous credit simulation")
     if args.n_steps is None:
         args.n_steps = 1260 if args.problem == "credit" else 126
     # Defaults keep programmatic callers compatible; persist them in the fingerprint.
@@ -210,7 +224,7 @@ def run(args):
         raise ValueError("Feedback/validation sizes and interval must be positive")
     if not 0 < args.entropic_ess_fraction <= 1:
         raise ValueError("Entropic ESS fraction must lie in (0,1]")
-    if args.feedback_paths and not args.validation_paths:
+    if args.feedback_paths and not args.validation_paths and args.target_regime != "hard":
         raise ValueError("External feedback requires a separate --validation-paths file")
     began = time.monotonic()
     if args.seconds <= 0 or args.rounds < 1 or args.groups < 2 or args.items < 2 or args.inner_steps < 1:
@@ -292,6 +306,8 @@ def run(args):
             entry.teacher = restored_programs[identity]
     history = out / "learner-history"
     history.mkdir(exist_ok=True)
+    # One immutable hard training pool; per-round subsets and evaluation RNG are separate.
+    compiled_hard = eqx.filter_jit(lambda key, batch: sample_hard(key, batch, config, args.problem))
     # Only target-training data may feed teacher rewards. Validation is disjoint.
     feedback_population = None
     feedback_hash = "fresh-neural-sde-prior-demonstration"
@@ -303,7 +319,19 @@ def run(args):
         chex.assert_shape(feedback_population, (feedback_population.shape[0], config.n_steps + 1, config.state_dim))
         if feedback_population.shape[0] < args.feedback_size:
             raise ValueError("Feedback population smaller than the requested batch")
-    if args.validation_paths:
+    if args.target_regime == "hard":
+        if feedback_population is None:
+            if args.hard_pool_size < max(args.feedback_size, args.groups*args.items):
+                raise ValueError("Hard pool must cover feedback and specialist batches")
+            feedback_population = compiled_hard(jax.random.key(args.seed + 101), args.hard_pool_size)
+            feedback_hash = "fixed-hard-training-pool-v1"
+        if feedback_population.shape[0] < max(args.feedback_size, args.groups*args.items):
+            raise ValueError("Hard pool too small")
+        if not bool(jnp.all(jnp.isfinite(feedback_population))):
+            raise ValueError("Hard pool must be finite")
+        validation_hash = "fresh-hard-target-v1"
+        validation_states = None
+    elif args.validation_paths:
         validation_file = Path(args.validation_paths)
         validation_hash = hashlib.sha256(validation_file.read_bytes()).hexdigest()
         if args.feedback_paths and validation_hash == feedback_hash:
@@ -313,9 +341,10 @@ def run(args):
     else:
         validation_hash = "independent-neural-sde-prior-validation"
         validation_states = simulator(prior, noise_fn(jax.random.key(args.seed + 3), args.validation_size, config), config).states
-    chex.assert_shape(validation_states, (validation_states.shape[0], config.n_steps + 1, config.state_dim))
-    if validation_states.shape[0] < 1:
-        raise ValueError("Validation must contain at least one path")
+    if validation_states is not None:
+        chex.assert_shape(validation_states, (validation_states.shape[0], config.n_steps + 1, config.state_dim))
+        if validation_states.shape[0] < 1:
+            raise ValueError("Validation must contain at least one path")
     hard_population = None
     if args.method == "fitted-sde":
         hard_file = Path(args.hard_paths)
@@ -484,7 +513,18 @@ def run(args):
         teacher = eqx.combine(state["teacher"], teacher_static)
         student_before = state["student"]
         metrics = {}
-        if args.method == "pathwise-meta-learning":
+        if args.method == "hard-specialist":
+            batch = args.groups * args.items
+            indices = jax.random.choice(draw_key, feedback_population.shape[0], (batch,), replace=False)
+            chex.assert_shape(indices, (batch,))
+            training_states = feedback_population[indices]
+            chex.assert_shape(training_states, (batch, config.n_steps + 1, config.state_dim))
+            pool = SimpleNamespace(states=training_states)
+            student = compiled_block(student_before, training_states, jnp.ones((batch,)), inner_key)
+            rewards = behavior = reference = jnp.zeros((batch,))
+            mutation_mask = jnp.zeros((batch,), dtype=bool)
+            apply_teacher = False
+        elif args.method == "pathwise-meta-learning":
             noise = noise_fn(draw_key, args.groups * args.items, config)
             ((objective_value, (student, pool, before_risk)), gradient) = compiled_pathwise_gradient(
                 state["teacher"], student_before, noise, inner_key, feedback_states)
@@ -547,7 +587,7 @@ def run(args):
 
             apply_teacher = args.method not in ("baseline", "fitted-sde")
             mutation_mask = jnp.zeros((batch,), dtype=bool)
-        if args.method in ("baseline", "fitted-sde"):
+        if args.method in ("baseline", "fitted-sde", "hard-specialist"):
             objective_value, teacher_metrics, gradient = jnp.array(0.), {}, ()
             candidate_teacher = state["teacher"]
             new_teacher_optimizer = state["teacher_optimizer"]
@@ -569,7 +609,13 @@ def run(args):
         elapsed = resumed_seconds + time.monotonic() - began
         if ((round_index + 1) % args.validation_every == 0
                 or round_index + 1 >= args.rounds or elapsed >= args.seconds):
-            measured_validation = compiled_metrics(student, validation_states)
+            if args.target_regime == "hard":
+                evaluation_key = jax.random.fold_in(jax.random.key(args.seed + 102), round_index)
+                fresh_validation = compiled_hard(evaluation_key, args.validation_size)
+                state["last_validation_key_data"] = jax.random.key_data(evaluation_key)
+                measured_validation = compiled_metrics(student, fresh_validation)
+            else:
+                measured_validation = compiled_metrics(student, validation_states)
         for value in jax.tree.leaves((student, candidate_teacher, new_teacher_optimizer, objective_value,
                                      teacher_metrics, gradient, rewards, behavior, reference, pool.states,
                                      target_risk, measured_feedback, measured_validation)):
@@ -601,7 +647,7 @@ def run(args):
 def main():
     """Parse one-seed GPU job configuration and run the selected teacher method."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde"), required=True)
+    parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde", "hard-specialist"), required=True)
     parser.add_argument("--problem", choices=("options", "credit"), default="options")
     parser.add_argument("--cds-days", type=int, default=126)
     parser.add_argument("--credit-grid-size", type=int, default=601)
@@ -620,11 +666,13 @@ def main():
     parser.add_argument("--warmup-steps", type=int, default=32)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--promotion-threshold", type=float, default=0.0001)
+    parser.add_argument("--target-regime", choices=("hard", "prior", "external"), default="hard")
+    parser.add_argument("--hard-pool-size", type=int, default=1024)
     parser.add_argument("--hard-paths", help="Full-state hard training NPZ; fitted-sde only")
     parser.add_argument("--fit-steps", type=int, default=1000)
     parser.add_argument("--fit-batch-size", type=int, default=32)
     parser.add_argument("--feedback-paths")
-    parser.add_argument("--feedback-size", type=int, default=1024)
+    parser.add_argument("--feedback-size", type=int, default=128)
     parser.add_argument("--validation-paths")
     parser.add_argument("--validation-size", type=int, default=2048)
     parser.add_argument("--validation-every", type=int, default=16)

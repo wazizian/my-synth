@@ -1,7 +1,8 @@
 # Neural-SDE teacher for deep hedging
 
-**Paused:** neural-SDE training, fitting, hyperparameter studies, readouts, and
-campaign launches are disabled by default. Source is retained for future work.
+**Neural teacher paused:** neural-SDE fitting, hyperparameter studies, readouts, and
+campaign launches are disabled by default; neural teacher training also requires opt-in.
+The non-neural `hard-specialist` arm is available. Source is retained for future work.
 Explicitly setting `NEURAL_SDE_ENABLED=1` re-enables these entry points; this does
 not authorize a GPU rental. Cleanup/export/watchdog operations remain available.
 The price-only fitting change is pending: the retained fitted-SDE implementation
@@ -10,6 +11,17 @@ still uses full simulator states. No new numerical validation has been run.
 
 This is the editable implementation. `../remote-code/` is a separately hashed,
 snapshot of historical Hetzner code. Current training uses this package; old campaigns are evidence only.
+
+## Hard targets restored
+
+The default downstream target is the fixed persistent-shock **hard regime**,
+with 1,024 static training paths and 128 resampled feedback paths per iteration.
+Evaluation simulates 2,048 fresh hard paths at each evaluation point. DPG and
+SOAR optimize against the hard subset; `hard-specialist` trains directly on
+that same static hard pool with the same learner architecture and initialization.
+See [HARD_REGIME.md](HARD_REGIME.md) for exact laws, limitations and commands.
+This supersedes older descriptions below of fresh neural-prior feedback and
+fixed validation. The price-only fitted-SDE change remains pending.
 
 ## Dynamics and observations
 
@@ -92,30 +104,29 @@ claim to reproduce their text-generation benchmarks or convergence theorems.
 
 ## Feedback and financial interpretation
 
-All training arms generate paths through the problem's neural-SDE adapter (`NeuralSDE` for options, `NeuralCredit` for credit). The fixed-prior control
-uses the initial neural SDE; DPG, SOAR, self-play and pathwise meta-learning adapt
-neural-SDE generators. Replay and mutation also execute neural SDEs. No categorical
-market selector is part of the active training configuration.
+The adaptive arms generate synthetic learner data through the problem's neural
+SDE (`NeuralSDE` for options, `NeuralCredit` for credit). The fixed-prior control
+samples the initial neural model. The hard specialist instead trains directly on
+fixed hard-regime paths. The target law is separate from the generator.
 
-By default, each round draws **1,024 fresh target-training paths** from the fixed
-initial neural-SDE prior, independently of the adapting teacher. DPG, SOAR and
-pathwise meta-learning share that exact batch across all within-round comparisons.
-Self-play's alignment reward remains defined on its generated round pool.
-Feedback randomness is part of the checkpointed RNG stream.
+By default, generate **1,024 fixed hard training paths**, then sample **128**
+without replacement per round. DPG, SOAR and pathwise meta-learning share that
+subset across all within-round downstream comparisons. Self-play's alignment
+reward remains defined on its generated round pool. Feedback subset randomness
+is checkpointed; the fixed hard pool is regenerated deterministically on resume.
 
-The fixed **2,048-path validation set** uses a separate random stream. It is
-measured every **16 rounds**, at the last requested round, and when a completed
-round exhausts the soft time budget. Validation never enters teacher rewards.
-A separate, untouched final test set is still required for scientific evaluation.
+Each evaluation uses **2,048 freshly simulated hard paths** from a separate RNG
+namespace. Evaluate every **16 rounds**, at the last requested round, and when a
+completed round exhausts the soft time budget. Matching rounds use common draws
+across methods. Evaluation never enters teacher rewards. A separate final test
+protocol remains required for scientific comparisons.
 
-For a declared target distribution, supply both `--feedback-paths training.npz`
-and `--validation-paths validation.npz`. Each contains
-`states[episodes,n_steps+1,1+n_latent]`. Training draws a uniform batch without
-replacement each round; the training population must contain at least
-`--feedback-size` paths. Supply genuinely disjoint files from the desired
-neural-SDE target law: hashes reject identical files but cannot certify data
-provenance or absence of partially overlapping rows. Validation uses its entire
-file. No loss-based mining or target reweighting is applied.
+An optional `--feedback-paths training.npz` replaces the static hard training pool.
+For fixed external training/validation data, explicitly select
+`--target-regime external` and supply both `--feedback-paths` and
+`--validation-paths`. Files contain `states[B,T+1,D]`, with D=3 for options and
+D=1 for continuous credit. Independent provenance is the caller's responsibility.
+`--target-regime prior` explicitly selects the old neural-prior demonstration.
 
 Entropic estimates on finite batches are downward biased and may miss rare
 losses. Every feedback/validation evaluation logs ESS, ESS/batch size, maximum

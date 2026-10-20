@@ -1,64 +1,32 @@
-# Current plan: neural-SDE generators for deep hedging
+# Current plan: hard-regime targets and a hard specialist
 
-**Paused:** neural-SDE training, fitting, hyperparameter studies, readouts, and
-campaign launches are disabled by default. Source is retained for future work.
-Explicitly setting `NEURAL_SDE_ENABLED=1` re-enables these entry points; this does
-not authorize a GPU rental. Cleanup/export/watchdog operations remain available.
-The price-only fitting change is pending: the retained fitted-SDE implementation
-still uses full simulator states. No new numerical validation has been run.
+Updated 2026-10-20. The target regime is separate from the adaptive generator.
 
+1. Restore the options persistent-shock hard physical law from the volatility
+   diagnostic: factor half-lives (40,3) days, noise .35, log(2) shock to both
+   factors at day 35. Continuous credit uses a new one-factor persistent-hazard
+   analogue, not the old two-factor credit benchmark. Verify economic hardness
+   before making claims about specialist gaps.
+2. Generate 1,024 hard training paths once. Each DPG/SOAR iteration samples 128
+   without replacement and shares that batch across its downstream comparisons.
+   Their synthetic learner data still comes from the teacher. Do not replace
+   the hard objective by risk on the initial neural prior.
+3. Evaluate on 2,048 freshly simulated hard paths every 16 rounds and at the
+   last completed round. Use independent RNG from the static training pool and
+   teacher, common evaluation draws across methods at matching rounds.
+4. Include `hard-specialist`: train the same GRU directly on subsets of the
+   same fixed hard pool, with the same initialization, optimizer, inner update
+   count and learner batch size. One initialization seed; no multiseed study.
+5. Record entropic risk, CVaR95, terminal error SD, credit daily marked-error SD,
+   and entropic ESS/concentration diagnostics. Finite-sample tail bias remains.
+6. Preserve the explicit pause on neural teacher computation. The new hard
+   specialist is available without the neural opt-in. Neural teacher methods
+   still require NEURAL_SDE_ENABLED=1. Price-only fitted-SDE work is pending;
+   the preserved full-state fitted baseline is not the requested final method.
+7. Only Ruff and py_compile locally/control-plane. GPU validation and numerical
+   training remain unrun. Do not rent GPUs without an authorized budget. Use
+   detached jobs, checkpoints, export and provider cleanup for authorized runs.
 
-Updated 2026-10-20. This replaces the previous market-design plan. No jobs or
-rentals are authorized by this document update.
-
-All active arms use the same neural-SDE path generator architecture and the same
-GRU hedger architecture and initialization. Use one training initialization seed.
-The control samples from the fixed initial neural SDE. Adaptive generators use
-DPG with GRPO, SOAR with dataset RLOO, or self-play with batch-level GRPO and
-expert iteration. Pathwise meta-learning is a separate experimental arm.
-
-The implementation is neural_sde_hedging/. Both options and credit are active problems. The option adapter hedges a capped
-option using price-history observations. The neural credit adapter hedges a long
-five-year ZCB with rolling six-month CDS (126 vintages) and preserves the existing
-credit ledger. Its default teacher uses a continuous hazard SDE with trainable
-neural drift, diffusion and risk-price networks. A common frozen neural pricing
-reference supplies interpolated bond/CDS marks. Default dates are marginalized
-exactly conditional on each factor path. All five methods support continuous
-credit, including pathwise meta-learning. Pricing is approximate and still needs
-grid-refinement/boundary checks. The earlier sampled grid adapter is an explicit
-reference (--credit-simulation grid) and rejects pathwise gradients.
-
-Teacher rewards use fresh target-training batches: default 1,024 paths per round,
-shared across all within-round comparisons. The target law is a fixed neural SDE,
-independent of the adapting teacher. External neural-SDE path datasets require
-separate, disjoint training and validation files. Do not select feedback paths by
-current losses without explicitly defining a new research objective.
-
-Evaluate a fixed independent 2,048-path validation set every 16 rounds and at the
-last round. Never use validation losses in teacher rewards. Keep the final test
-set separate and untouched. Record entropic risk, CVaR95, terminal error standard
-deviation and entropic weight ESS/concentration. Daily marked error standard
-deviation is available for credit from the existing ledger, but remains unavailable
-for options until a coherent marking adapter is implemented.
-
-Feedback entropic estimates are finite-sample and downward biased. Flag ESS below
-10% of batch size, inspect maximum weight, and assess larger batches before
-scientific runs. Current defaults are starting settings, not validated choices.
-
-Replay currently stores neural-SDE generator snapshots, executes them with fresh
-noise, and recomputes rewards for the current hedger. Retain that behavior pending
-an explicit generator-replay versus trajectory-replay comparison and an audit of
-the sampling/importance-weight estimator. No replay change is authorized here.
-
-Validate new feedback sampling, periodic validation, resume RNG and pathwise
-higher-order gradients on a GPU before a full campaign. Only Ruff and py_compile
-may run on the local/control-plane CPU. GPU jobs require durable supervisors,
-bounded runtime/cost/storage, checkpoint export and confirmed provider cleanup.
-Existing stopped-run evidence remains unchanged in historical artifact folders.
-
-Additional baseline: `fitted-sde` fits the neural SDE to full-state hard-regime
-training paths using the Gaussian likelihood at every daily transition, then
-freezes it and trains the same hedger on fresh simulations. It supports options
-and continuous credit; independent validation is required. See [FITTED_SDE.md](neural_sde_hedging/FITTED_SDE.md).
-Fitting is privileged full-state inference, not price-only latent inference.
-The existing four-arm launcher is unchanged; GPU checks remain unrun.
+See [HARD_REGIME.md](neural_sde_hedging/HARD_REGIME.md) for implementation,
+scientific caveats and the specialist command. The four-GPU launcher still has
+its original four arms; run the specialist as a separate job.

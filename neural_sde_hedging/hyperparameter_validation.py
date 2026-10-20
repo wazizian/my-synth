@@ -108,7 +108,7 @@ def run_trial(spec, rounds, tag, output, evaluator, template, dev, contract):
     destination = output / "trials" / tag
     destination.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, "-m", "neural_sde_hedging.training",
-               "--method", spec["method"], "--output", str(folder),
+               "--method", spec["method"], "--target-regime", "prior", "--output", str(folder),
                "--rounds", str(rounds), "--seconds", "5400", "--n-steps", "126",
                "--groups", "4", "--items", str(spec["items"]), "--inner-steps", "8",
                "--feedback-size", "1024", "--payoff-cap", "1", "--seed", "20261017",

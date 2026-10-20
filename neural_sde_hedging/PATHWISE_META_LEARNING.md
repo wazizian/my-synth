@@ -36,9 +36,10 @@ gradient norm to 1; this provides no guarantee of downstream improvement.
 
 Target paths are independent of generated training paths and frozen during an
 unroll. A fresh target-training batch is drawn each round and shared within the unroll.
-A separate fixed validation set is evaluated periodically. Use --feedback-paths
-and --validation-paths for a declared neural-SDE target law; the default is only
-an initial-prior demonstration. An untouched final test is still required.
+The default downstream target is now a subset of a fixed hard-regime training
+pool; evaluation draws fresh hard paths from independent RNG. See
+[HARD_REGIME.md](HARD_REGIME.md). Fixed externally supplied training/validation
+files require `--target-regime external`.
 
 Atomic checkpointing, GPU-only enforcement, finite checks and time/disk budgets
 are inherited from training.py. The four-GPU campaign launcher and hyperparameter

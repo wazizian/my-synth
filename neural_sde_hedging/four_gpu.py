@@ -153,7 +153,8 @@ def training_jobs(config, phase):
     for method, gpu in zip(METHODS, config["gpus"], strict=True):
         profile = config.get("hyperparameters", {}).get(method, {})
         argv = [config["python"], "-m", "neural_sde_hedging.training",
-                "--method", method, "--problem", config["problem"],
+                "--method", method, "--target-regime", config.get("target_regime", "hard"),
+                "--problem", config["problem"],
                 "--credit-simulation", config["credit_simulation"], "--output", str(root / phase / method),
                 "--seconds", str(seconds), "--rounds",
                 str(config["calibration_rounds"] if phase == "calibration" else 1000000),
@@ -162,11 +163,12 @@ def training_jobs(config, phase):
                 "--student-lr", str(profile.get("student_lr", .0003)),
                 "--teacher-lr", str(profile.get("teacher_lr", .001)),
                 "--warmup-steps", str(profile.get("warmup_steps", 32)), "--weight-decay", "0.01",
-                "--feedback-size", "1024", "--payoff-cap", "1",
+                "--feedback-size", "128", "--payoff-cap", "1",
                 "--min-free-gb", str(config["min_free_gb"])]
         if config["feedback_paths"]:
-            argv += ["--feedback-paths", config["feedback_paths"],
-                     "--validation-paths", config["validation_paths"]]
+            argv += ["--feedback-paths", config["feedback_paths"]]
+            if config["validation_paths"]:
+                argv += ["--validation-paths", config["validation_paths"]]
         jobs.append((phase + "-" + method, gpu, argv))
     write_json(root / (phase + "-commands.json"), jobs)
     return jobs
@@ -252,6 +254,8 @@ def launch(args):
     root = Path(args.output).resolve()
     if root.exists():
         raise ValueError("Use a new output directory for each campaign")
+    if args.target_regime == "hard" and args.validation_paths:
+        raise ValueError("Hard evaluation samples fresh paths; omit --validation-paths")
     cleanup_argv = json.loads(args.cleanup_argv)
     if not isinstance(cleanup_argv, list) or not cleanup_argv or not all(
         isinstance(value, str) and value for value in cleanup_argv
@@ -310,7 +314,7 @@ def launch(args):
     shutil.copy2(source.parent / "tests/test_neural_sde_gpu.py", code / "tests")
     feedback = None
     validation = None
-    if bool(args.feedback_paths) != bool(args.validation_paths):
+    if args.target_regime != "hard" and bool(args.feedback_paths) != bool(args.validation_paths):
         raise ValueError("Provide both feedback and validation path files, or neither")
     if args.validation_paths:
         validation = root / "validation.npz"
@@ -362,6 +366,7 @@ def main():
     command.add_argument("--min-free-gb", type=float, default=10.)
     command.add_argument("--max-artifact-gb", type=float, default=10.)
     command.add_argument("--export-interval", type=float, default=60.)
+    command.add_argument("--target-regime", choices=("hard", "prior", "external"), default="hard")
     command.add_argument("--feedback-paths")
     command.add_argument("--problem", choices=("options", "credit"), default="options")
     command.add_argument("--credit-simulation", choices=("continuous", "grid"), default="continuous")

@@ -30,6 +30,7 @@ from neural_sde_hedging.dynamics import (NeuralSDE, SDEPaths, path_log_prob,
                                          transition_coefficients,
                                          transition_log_prob)
 from neural_sde_hedging.hedger import Contract, Hedger, terminal_losses
+from neural_sde_hedging.hard_regime import sample_hard
 from neural_sde_hedging.methods import (pathwise_meta_learning, dpg_attributions, selfplay_objective,
                                        selfplay_rewards, soar_branches)
 from neural_sde_hedging.replay import ProgramBank, build_pool
@@ -276,9 +277,10 @@ def test_selfplay_historical_alignment_and_mutation_exclusion():
     ("options", method, "continuous") for method in ("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde")
 ] + [("credit", method, "grid") for method in ("baseline", "dpg", "soar", "selfplay")]
   + [("credit", method, "continuous") for method in ("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde")])
-def test_complete_training_and_resume(tmp_path, problem, method, credit_simulation):
+def test_complete_training_and_resume(tmp_path, problem, method, credit_simulation, monkeypatch):
     """Run two tiny real GPU rounds per method and verify exact no-reset resume."""
-    args = SimpleNamespace(method=method, problem=problem, credit_simulation=credit_simulation,
+    monkeypatch.setenv("NEURAL_SDE_ENABLED", "1")
+    args = SimpleNamespace(method=method, target_regime="prior", problem=problem, credit_simulation=credit_simulation,
                            cds_days=2, credit_grid_size=301,
                            output=str(tmp_path / method), seconds=600.,
                            rounds=2, seed=20261017, groups=2, items=2, inner_steps=1,
@@ -299,6 +301,8 @@ def test_complete_training_and_resume(tmp_path, problem, method, credit_simulati
         for name, count, seed in (("hard", 8, 951), ("validation", 8, 952)):
             states = simulator(model, noise_fn(jax.random.key(seed), count, cfg), cfg).states
             np.savez(tmp_path / f"{name}.npz", states=np.asarray(states))
+        args.target_regime = "external"
+        args.feedback_paths = str(tmp_path / "hard.npz")
         args.hard_paths = str(tmp_path / "hard.npz")
         args.validation_paths = str(tmp_path / "validation.npz")
         args.fit_steps, args.fit_batch_size = 2, 4
@@ -416,8 +420,9 @@ def test_neural_credit_pricing_density_default_and_checkpoint(tmp_path):
                                   credit.path_log_prob(teacher, paths, config))
 
 
-def test_neural_credit_rejects_invalid_pathwise_training(tmp_path):
+def test_neural_credit_rejects_invalid_pathwise_training(tmp_path, monkeypatch):
     """Reject unsupported gradients through discrete defaults before training starts."""
+    monkeypatch.setenv("NEURAL_SDE_ENABLED", "1")
     args = SimpleNamespace(problem="credit", credit_simulation="grid", method="pathwise-meta-learning",
                            output=str(tmp_path), n_steps=3)
     with pytest.raises(ValueError, match="discrete"):
@@ -555,3 +560,73 @@ def test_gaussian_fit_loss_uses_every_transition_and_log_determinant(small_model
     np.testing.assert_allclose(actual, np.mean(expected), rtol=2e-5, atol=2e-5)
     assert np.isfinite(float(optax.global_norm(gradient)))
     assert float(optax.global_norm(gradient.diffusion_network)) > 0
+
+
+@pytest.mark.parametrize("problem", ["options", "credit"])
+def test_hard_sampler_matches_reference(problem):
+    """Check the fixed hard law, persistent day-35 shock and fresh independent draws."""
+    config = SDEConfig(n_steps=40) if problem == "options" else credit_continuous.CreditSDEConfig(n_steps=40)
+    key, batch = jax.random.key(210), 4
+    actual = sample_hard(key, batch, config, problem)
+    noise = np.asarray(jax.random.normal(key, (config.n_steps, batch, config.state_dim)))
+    decay = np.exp(-np.log(2.)/np.asarray((40., 3.) if problem == "options" else (40.,)))
+    sd = .35*np.sqrt(config.dt*(1-decay**2)/(-2*np.log(decay)))
+    state = np.zeros((batch, config.state_dim))
+    if problem == "credit":
+        state[:, 0] = config.initial_latent
+    expected = [state.copy()]
+    for day, z in enumerate(noise):
+        shock = np.log(2.) if day == 35 else 0.
+        if problem == "options":
+            factors = state[:, 1:] + shock
+            variance = .04*np.exp(np.sum(factors, axis=1))
+            spot = state[:, 0] - .5*variance*config.dt + np.sqrt(variance*config.dt)*z[:, 0]
+            state = np.concatenate((spot[:, None], factors*decay + sd*z[:, 1:]), axis=1)
+        else:
+            state = config.initial_latent + (state-config.initial_latent+shock)*decay + sd*z
+        expected.append(state.copy())
+    np.testing.assert_allclose(actual, np.stack(expected, axis=1), rtol=2e-5, atol=2e-6)
+    np.testing.assert_array_equal(actual, sample_hard(key, batch, config, problem))
+    fresh = sample_hard(jax.random.fold_in(key, 1), batch, config, problem)
+    assert not np.array_equal(actual[:, 1:], fresh[:, 1:])
+
+
+@pytest.mark.parametrize("problem", ["options", "credit"])
+@pytest.mark.parametrize("method", ["dpg", "soar", "hard-specialist"])
+def test_hard_target_pool_fresh_evaluation_and_specialist(tmp_path, monkeypatch, problem, method):
+    """Exercise shared fixed-pool targets, fresh hard evaluation and resumed RNG on GPU."""
+    monkeypatch.setenv("NEURAL_SDE_ENABLED", "1")
+    args = SimpleNamespace(method=method, target_regime="hard", hard_pool_size=8,
+                           problem=problem, credit_simulation="continuous", cds_days=2,
+                           credit_grid_size=31, output=str(tmp_path / method), seconds=600.,
+                           rounds=2, seed=20261017, groups=2, items=2, inner_steps=1,
+                           n_steps=3, gamma=10., student_lr=3e-4, teacher_lr=1e-3,
+                           warmup_steps=2, weight_decay=.01, promotion_threshold=1e-4,
+                           feedback_paths=None, feedback_size=4, validation_paths=None,
+                           validation_size=8, validation_every=1, entropic_ess_fraction=.1,
+                           payoff_cap=.5, premium=0., min_free_gb=.01)
+    run(args)
+    out = tmp_path / method
+    state = load_checkpoint(out / "latest.pkl")
+    assert state["feedback_hash"] == "fixed-hard-training-pool-v1"
+    assert state["validation_hash"] == "fresh-hard-target-v1"
+    expected = jax.random.key_data(jax.random.fold_in(jax.random.key(args.seed+102), 1))
+    np.testing.assert_array_equal(state["last_validation_key_data"], expected)
+    rows = [json.loads(row) for row in (out / "progress.jsonl").read_text().splitlines()]
+    assert len(rows) == 2
+    assert all(row["validation_sample_size"] == 8 for row in rows)
+    if method == "hard-specialist":
+        assert all(row["teacher_gradient_norm"] == 0 for row in rows)
+        if problem == "options":
+            initial = Hedger(jax.random.key(args.seed))
+        else:
+            from credit_hedging.policy import Hedger as CreditHedger
+            initial = CreditHedger(jax.random.key(args.seed), n_vintages=args.cds_days)
+        changed = [not np.array_equal(before, after)
+                   for before, after in zip(jax.tree.leaves(eqx.filter(initial, eqx.is_inexact_array)),
+                                             jax.tree.leaves(state["student"][0]))]
+        assert any(changed)
+    run(args)
+    resumed = load_checkpoint(out / "latest.pkl")
+    np.testing.assert_array_equal(state["key_data"], resumed["key_data"])
+    np.testing.assert_array_equal(state["last_validation_key_data"], resumed["last_validation_key_data"])
