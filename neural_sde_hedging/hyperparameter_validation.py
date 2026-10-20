@@ -29,6 +29,9 @@ from .metrics import risk_metrics
 from .training import atomic_checkpoint, load_checkpoint, restore_layout
 
 
+from .runtime import require_enabled
+
+
 def evaluate(params, static, states, contract):
     """Return losses [episodes] from learner arrays/static and fixed paths [episodes,time,state]."""
     from types import SimpleNamespace
@@ -205,6 +208,7 @@ def plot_results(output, records):
 
 def main():
     """Screen small LR/batch/warmup grid then confirm selected/default configurations independently."""
+    require_enabled()
     if jax.default_backend() != "gpu":
         raise RuntimeError("Hyperparameter validation requires provisioned GPU")
     output = Path(os.environ["JOB_OUTPUT_DIR"])

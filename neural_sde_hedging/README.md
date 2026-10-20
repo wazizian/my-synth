@@ -1,5 +1,13 @@
 # Neural-SDE teacher for deep hedging
 
+**Paused:** neural-SDE training, fitting, hyperparameter studies, readouts, and
+campaign launches are disabled by default. Source is retained for future work.
+Explicitly setting `NEURAL_SDE_ENABLED=1` re-enables these entry points; this does
+not authorize a GPU rental. Cleanup/export/watchdog operations remain available.
+The price-only fitting change is pending: the retained fitted-SDE implementation
+still uses full simulator states. No new numerical validation has been run.
+
+
 This is the editable implementation. `../remote-code/` is a separately hashed,
 snapshot of historical Hetzner code. Current training uses this package; old campaigns are evidence only.
 
@@ -13,13 +21,17 @@ See [DYNAMICS.md](DYNAMICS.md) for the equations and discrete P/Q conventions.
 
 The shared GRU hedger receives log prices, returns, time, and its own previous
 holding. No latent state, volatility estimate, scenario label, or teacher identity
-is supplied. Every arm starts from the same architecture and initialization.
+is supplied. Every arm for a given problem starts from the same architecture and initialization.
 
-The runnable financial adapter is an option hedge with a dollar holding cap.
-It is a new implementation, not a retrofit of the old credit campaign. The full
-old credit implementation is preserved in the source snapshot. The standalone
-method primitives accept arbitrary differentiable learner/target callbacks,
-including a future neural-hazard credit adapter.
+The runner supports both `--problem options` (an option hedge with a dollar
+holding cap) and `--problem credit` (a five-year long ZCB hedged using daily
+new six-month CDS and partial sales of existing vintages). The credit adapter
+defaults to a continuous neural hazard SDE with trainable drift, diffusion and
+risk-price networks, a fixed neural pricing reference, and exact conditional
+default-date integration. All five methods support continuous credit. See
+[CREDIT.md](CREDIT.md) for equations, conventions and restrictions. Each problem
+uses one common GRU architecture/initialization across its training methods;
+credit requires vintage inputs and outputs absent from the option hedger.
 
 ## Method implementation map
 
@@ -43,9 +55,9 @@ claim to reproduce their text-generation benchmarks or convergence theorems.
 * Entropic risk replaces additive token loss. Weighted risk includes its weight
   denominator. Self-play weights raw loss JVPs by detached `B*softmax(gamma*loss)`;
   it does not differentiate these weights a second time.
-* Whole **joint Euler path densities** replace sequence probabilities. Initial
+* Whole **Euler factor-path densities** replace sequence probabilities. Initial
   states are fixed and conditional, with no learned initial-state distribution.
-  Every latent and spot transition and log determinant is included. Brownian
+  Every generated factor/spot transition and diffusion log determinant is included. Brownian
   innovation density alone is not used as a changing-teacher score.
 * A reusable program is a frozen neural SDE. Its fresh execution is scored under
   its actual producing snapshot, the current teacher, and the frozen prior. The
@@ -80,7 +92,7 @@ claim to reproduce their text-generation benchmarks or convergence theorems.
 
 ## Feedback and financial interpretation
 
-All training arms generate paths through `NeuralSDE`. The fixed-prior control
+All training arms generate paths through the problem's neural-SDE adapter (`NeuralSDE` for options, `NeuralCredit` for credit). The fixed-prior control
 uses the initial neural SDE; DPG, SOAR, self-play and pathwise meta-learning adapt
 neural-SDE generators. Replay and mutation also execute neural SDEs. No categorical
 market selector is part of the active training configuration.
@@ -124,8 +136,9 @@ coherently priced evaluation design.
 Training logs include feedback empirical entropic risk, fractional CVaR95,
 population terminal standard deviation and mean loss in underlying currency
 units. `metrics.py` can also consume actual daily marked hedging errors. The
-new runner does not produce Q-marked daily errors yet; it never labels returns
-or unmarked P&L as that metric. The old source and reports retain their existing
+option adapter does not produce Q-marked daily errors yet; it never labels returns
+or unmarked P&L as that metric. The credit adapter reports actual daily discounted
+marked hedging errors from its bond/CDS ledger. The old source and reports retain their existing
 daily marked evaluation implementations.
 
 The ordinary-call default remains available (`payoff_cap=None`). Its lognormal
@@ -178,3 +191,10 @@ For a detached baseline/DPG/SOAR/self-play allocation with GPU calibration,
 artifact exports, spending envelope and provider cleanup, see
 [FOUR_GPU.md](FOUR_GPU.md) and the `neural_sde_hedging.four_gpu` launcher.
 
+
+Additional baseline: `fitted-sde` fits the neural SDE to full-state hard-regime
+training paths using the Gaussian likelihood at every daily transition, then
+freezes it and trains the same hedger on fresh simulations. It supports options
+and continuous credit; independent validation is required. See [FITTED_SDE.md](FITTED_SDE.md).
+Fitting is privileged full-state inference, not price-only latent inference.
+The existing four-arm launcher is unchanged; GPU checks remain unrun.

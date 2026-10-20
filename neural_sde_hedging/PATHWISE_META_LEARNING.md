@@ -48,3 +48,14 @@ Validation: Ruff and py_compile only on the control plane. GPU-only tests now
 include a fixed-noise finite-difference check through SDE simulation and two Adam
 updates, plus the method's training/checkpoint integration case. These new tests
 have not been executed; no GPU was rented or computation launched for this change.
+
+## Continuous credit
+
+Add `--problem credit` to select continuous neural hazard proposals and the
+five-year ZCB/rolling six-month CDS ledger. Default dates are analytically
+marginalized conditional on each continuous factor path; entropic aggregation
+retains the full loss distribution. Gradients include default probabilities and
+all inner updates. A fixed neural pricing reference supplies interpolated quotes.
+See [CREDIT.md](CREDIT.md) for the proposal/pricing distinction and unexecuted GPU
+checks. The explicit legacy `--credit-simulation grid` adapter remains unsupported
+for pathwise training.

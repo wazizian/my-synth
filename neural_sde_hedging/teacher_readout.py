@@ -20,6 +20,9 @@ from .metrics import risk_metrics
 from .training import atomic_checkpoint, learner_block, load_checkpoint, restore_layout
 
 
+from .runtime import require_enabled
+
+
 def main():
     """Compare prior/default/selected frozen teachers using same 96/512-step learner budgets.
 
@@ -27,6 +30,7 @@ def main():
     learner partitions, losses and paired path-bootstrap intervals on a new
     8192-path prior-target set, never used to choose generator hyperparameters.
     """
+    require_enabled()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--default-checkpoint", required=True)
     parser.add_argument("--selected-checkpoint", required=True)

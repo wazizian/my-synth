@@ -16,6 +16,8 @@ def book_step(book, action, market, tables, config: MarketConfig):
     protection is capped by config.max_protection. market supplies day (scalar),
     state/next_state, alive/default [batch]. All trades occur before today's
     default is known. Default and maturity cashflows occur at the day's end.
+    Optional market['quotes'] supplies bond [batch] and CDS legs
+    [batch,cds_days+1], including next-date quotes, instead of grid lookups.
     """
     batch, n_vintages = book['notional'].shape
     chex.assert_shape((book['notional'], book['coupon'], action['retain']), (batch, n_vintages))
@@ -34,11 +36,22 @@ def book_step(book, action, market, tables, config: MarketConfig):
     chex.assert_shape(remaining_bond, ())
     final = remaining_bond == 1
     chex.assert_shape(final, ())
-    old_marks = tables['protection'][remaining[None, :], state[:, None]] - book['coupon'] * tables['annuity'][remaining[None, :], state[:, None]]
+    if 'quotes' in market:
+        quotes = market['quotes']
+        old_marks = quotes['protection'][:, remaining] - book['coupon'] * quotes['annuity'][:, remaining]
+        current_bond = quotes['bond']
+        next_bond = quotes['next_bond']
+        par_spread = quotes['protection'][:, config.cds_days] / quotes['annuity'][:, config.cds_days]
+    else:
+        old_marks = tables['protection'][remaining[None, :], state[:, None]] - book['coupon'] * tables['annuity'][remaining[None, :], state[:, None]]
+        current_bond = tables['bond'][remaining_bond, state]
+        next_bond = tables['bond'][remaining_bond-1, next_state]
+        par_spread = tables['par_spread'][state]
+    chex.assert_shape((current_bond, next_bond, par_spread), (batch,))
     chex.assert_shape(old_marks, (batch, n_vintages))
     old_cds_value = jnp.sum(book['notional'] * old_marks, axis=1)
     chex.assert_shape(old_cds_value, (batch,))
-    old_bond_value = jnp.where(alive, tables['bond'][remaining_bond, state], 0)
+    old_bond_value = jnp.where(alive, current_bond, 0)
     chex.assert_shape(old_bond_value, (batch,))
     retained = book['notional'] * jnp.clip(action['retain'], 0, 1)
     chex.assert_shape(retained, (batch, n_vintages))
@@ -52,7 +65,7 @@ def book_step(book, action, market, tables, config: MarketConfig):
     chex.assert_shape(holdings, (batch, n_vintages))
     holdings = jnp.where(alive[:, None], holdings, 0)
     chex.assert_shape(holdings, (batch, n_vintages))
-    coupons = book['coupon'].at[:, 0].set(tables['par_spread'][state])
+    coupons = book['coupon'].at[:, 0].set(par_spread)
     chex.assert_shape(coupons, (batch, n_vintages))
     sale_cash = jnp.where(alive, jnp.sum(sold * old_marks, axis=1), 0)
     chex.assert_shape(sale_cash, (batch,))
@@ -75,7 +88,10 @@ def book_step(book, action, market, tables, config: MarketConfig):
     chex.assert_shape((next_notional, next_coupon), (batch, n_vintages))
     next_notional = jnp.where(survive[:, None], next_notional, 0)
     chex.assert_shape(next_notional, (batch, n_vintages))
-    next_marks = tables['protection'][remaining[None, :], next_state[:, None]] - next_coupon * tables['annuity'][remaining[None, :], next_state[:, None]]
+    if 'quotes' in market:
+        next_marks = quotes['next_protection'][:, remaining] - next_coupon * quotes['next_annuity'][:, remaining]
+    else:
+        next_marks = tables['protection'][remaining[None, :], next_state[:, None]] - next_coupon * tables['annuity'][remaining[None, :], next_state[:, None]]
     chex.assert_shape(next_marks, (batch, n_vintages))
     next_cds_value = jnp.sum(next_notional * next_marks, axis=1)
     chex.assert_shape(next_cds_value, (batch,))
@@ -88,7 +104,7 @@ def book_step(book, action, market, tables, config: MarketConfig):
     next_coupon = jnp.where(next_notional > 0, next_coupon, 0)
     chex.assert_shape(next_coupon, (batch, n_vintages))
     next_cds_value = jnp.where(final, 0, next_cds_value)
-    next_bond_value = jnp.where(survive & ~final, tables['bond'][remaining_bond-1, next_state], 0)
+    next_bond_value = jnp.where(survive & ~final, next_bond, 0)
     chex.assert_shape((next_cds_value, next_bond_value), (batch,))
     discount_start = jnp.exp(-config.rate*market['day']*dt)
     discount_end = jnp.exp(-config.rate*(market['day']+1)*dt)

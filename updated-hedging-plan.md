@@ -1,5 +1,13 @@
 # Current plan: neural-SDE generators for deep hedging
 
+**Paused:** neural-SDE training, fitting, hyperparameter studies, readouts, and
+campaign launches are disabled by default. Source is retained for future work.
+Explicitly setting `NEURAL_SDE_ENABLED=1` re-enables these entry points; this does
+not authorize a GPU rental. Cleanup/export/watchdog operations remain available.
+The price-only fitting change is pending: the retained fitted-SDE implementation
+still uses full simulator states. No new numerical validation has been run.
+
+
 Updated 2026-10-20. This replaces the previous market-design plan. No jobs or
 rentals are authorized by this document update.
 
@@ -9,9 +17,16 @@ The control samples from the fixed initial neural SDE. Adaptive generators use
 DPG with GRPO, SOAR with dataset RLOO, or self-play with batch-level GRPO and
 expert iteration. Pathwise meta-learning is a separate experimental arm.
 
-The implementation is neural_sde_hedging/. The current adapter hedges a capped
-option using price-history observations. A neural-hazard credit adapter remains
-future work; historical credit experiments are not the active implementation.
+The implementation is neural_sde_hedging/. Both options and credit are active problems. The option adapter hedges a capped
+option using price-history observations. The neural credit adapter hedges a long
+five-year ZCB with rolling six-month CDS (126 vintages) and preserves the existing
+credit ledger. Its default teacher uses a continuous hazard SDE with trainable
+neural drift, diffusion and risk-price networks. A common frozen neural pricing
+reference supplies interpolated bond/CDS marks. Default dates are marginalized
+exactly conditional on each factor path. All five methods support continuous
+credit, including pathwise meta-learning. Pricing is approximate and still needs
+grid-refinement/boundary checks. The earlier sampled grid adapter is an explicit
+reference (--credit-simulation grid) and rejects pathwise gradients.
 
 Teacher rewards use fresh target-training batches: default 1,024 paths per round,
 shared across all within-round comparisons. The target law is a fixed neural SDE,
@@ -23,7 +38,8 @@ Evaluate a fixed independent 2,048-path validation set every 16 rounds and at th
 last round. Never use validation losses in teacher rewards. Keep the final test
 set separate and untouched. Record entropic risk, CVaR95, terminal error standard
 deviation and entropic weight ESS/concentration. Daily marked error standard
-deviation remains unavailable until a coherent marking adapter is implemented.
+deviation is available for credit from the existing ledger, but remains unavailable
+for options until a coherent marking adapter is implemented.
 
 Feedback entropic estimates are finite-sample and downward biased. Flag ESS below
 10% of batch size, inspect maximum weight, and assess larger batches before
@@ -39,3 +55,10 @@ higher-order gradients on a GPU before a full campaign. Only Ruff and py_compile
 may run on the local/control-plane CPU. GPU jobs require durable supervisors,
 bounded runtime/cost/storage, checkpoint export and confirmed provider cleanup.
 Existing stopped-run evidence remains unchanged in historical artifact folders.
+
+Additional baseline: `fitted-sde` fits the neural SDE to full-state hard-regime
+training paths using the Gaussian likelihood at every daily transition, then
+freezes it and trains the same hedger on fresh simulations. It supports options
+and continuous credit; independent validation is required. See [FITTED_SDE.md](neural_sde_hedging/FITTED_SDE.md).
+Fitting is privileged full-state inference, not price-only latent inference.
+The existing four-arm launcher is unchanged; GPU checks remain unrun.

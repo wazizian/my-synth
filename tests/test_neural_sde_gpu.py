@@ -24,6 +24,7 @@ if jax.default_backend() != "gpu":
     raise RuntimeError("Explicit neural-SDE validation requires a GPU backend")
 
 from neural_sde_hedging.config import SDEConfig
+from neural_sde_hedging import credit, credit_continuous
 from neural_sde_hedging.dynamics import (NeuralSDE, SDEPaths, path_log_prob,
                                          sample_noise, simulate,
                                          transition_coefficients,
@@ -32,7 +33,7 @@ from neural_sde_hedging.hedger import Contract, Hedger, terminal_losses
 from neural_sde_hedging.methods import (pathwise_meta_learning, dpg_attributions, selfplay_objective,
                                        selfplay_rewards, soar_branches)
 from neural_sde_hedging.replay import ProgramBank, build_pool
-from neural_sde_hedging.training import atomic_checkpoint, learner_block, load_checkpoint, run
+from neural_sde_hedging.training import atomic_checkpoint, gaussian_fit_loss, learner_block, load_checkpoint, run
 
 
 @pytest.fixture
@@ -271,16 +272,36 @@ def test_selfplay_historical_alignment_and_mutation_exclusion():
     np.testing.assert_array_equal(jax.grad(objective)(logp), [0., 0.])
 
 
-@pytest.mark.parametrize("method", ("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning"))
-def test_complete_training_and_resume(tmp_path, method):
+@pytest.mark.parametrize("problem,method,credit_simulation", [
+    ("options", method, "continuous") for method in ("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde")
+] + [("credit", method, "grid") for method in ("baseline", "dpg", "soar", "selfplay")]
+  + [("credit", method, "continuous") for method in ("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde")])
+def test_complete_training_and_resume(tmp_path, problem, method, credit_simulation):
     """Run two tiny real GPU rounds per method and verify exact no-reset resume."""
-    args = SimpleNamespace(method=method, output=str(tmp_path / method), seconds=600.,
+    args = SimpleNamespace(method=method, problem=problem, credit_simulation=credit_simulation,
+                           cds_days=2, credit_grid_size=301,
+                           output=str(tmp_path / method), seconds=600.,
                            rounds=2, seed=20261017, groups=2, items=2, inner_steps=1,
                            n_steps=3, gamma=10., student_lr=3e-4, teacher_lr=1e-3,
                            warmup_steps=2, weight_decay=.01,
                            promotion_threshold=1e-4, feedback_paths=None,
                            feedback_size=4, validation_size=8, validation_every=2,
                            validation_paths=None, entropic_ess_fraction=.1, payoff_cap=.5, premium=0., min_free_gb=.01)
+    if method == "fitted-sde":
+        if problem == "credit":
+            cfg = credit_continuous.CreditSDEConfig(n_steps=3, cds_days=2, grid_size=301)
+            model = credit_continuous.NeuralCredit(jax.random.key(args.seed + 1), cfg)
+            simulator, noise_fn = credit_continuous.simulate, credit_continuous.sample_noise
+        else:
+            cfg = SDEConfig(n_steps=3)
+            model = NeuralSDE(jax.random.key(args.seed + 1), cfg)
+            simulator, noise_fn = simulate, sample_noise
+        for name, count, seed in (("hard", 8, 951), ("validation", 8, 952)):
+            states = simulator(model, noise_fn(jax.random.key(seed), count, cfg), cfg).states
+            np.savez(tmp_path / f"{name}.npz", states=np.asarray(states))
+        args.hard_paths = str(tmp_path / "hard.npz")
+        args.validation_paths = str(tmp_path / "validation.npz")
+        args.fit_steps, args.fit_batch_size = 2, 4
     run(args)
     directory = tmp_path / method
     with (directory / "status.json").open() as stream:
@@ -296,15 +317,33 @@ def test_complete_training_and_resume(tmp_path, method):
     assert 0 < rows[0]["feedback_entropic_ess_fraction"] <= 1.00001
     assert 0 < rows[0]["feedback_entropic_max_weight"] <= 1
     expected_key = jax.random.key(args.seed + 2)
+    if method == "fitted-sde":
+        for _ in range(args.fit_steps):
+            expected_key = jax.random.split(expected_key)[0]
+        assert before["fit_step"] == args.fit_steps
+        frozen = load_checkpoint(directory / "fitted-generator.pkl")
+        for fitted, current in zip(jax.tree.leaves(eqx.filter(frozen, eqx.is_inexact_array)),
+                                   jax.tree.leaves(before["teacher"])):
+            np.testing.assert_array_equal(fitted, current)
+        fit_rows = (directory / "fit-progress.jsonl").read_text().splitlines()
+        assert len(fit_rows) == args.fit_steps
+        assert all(np.isfinite(json.loads(row)["transition_nll"]) for row in fit_rows)
     for _ in range(2):
         expected_key = jax.random.split(expected_key, 4)[0]
     np.testing.assert_array_equal(before["key_data"], jax.random.key_data(expected_key))
     assert np.isfinite(before["seconds"])
     if method == "baseline":
-        prior = NeuralSDE(jax.random.key(args.seed + 1), SDEConfig(n_steps=args.n_steps))
+        if problem == "credit":
+            backend = credit_continuous if credit_simulation == "continuous" else credit
+            prior = backend.NeuralCredit(jax.random.key(args.seed + 1),
+                                          backend.CreditSDEConfig(n_steps=args.n_steps))
+        else:
+            prior = NeuralSDE(jax.random.key(args.seed + 1), SDEConfig(n_steps=args.n_steps))
         for saved, original in zip(jax.tree.leaves(before["teacher"]),
                                    jax.tree.leaves(eqx.filter(prior, eqx.is_inexact_array))):
             np.testing.assert_array_equal(saved, original)
+    if problem == "credit":
+        assert np.isfinite(rows[1]["validation_daily_error_std"])
     if method == "selfplay":
         assert len(before["bank"].history) > 0
         assert (directory / "learner-history" / "00000000.pkl").exists()
@@ -312,5 +351,207 @@ def test_complete_training_and_resume(tmp_path, method):
     after = load_checkpoint(directory / "latest.pkl")
     assert after["round_index"] == before["round_index"]
     np.testing.assert_array_equal(after["key_data"], before["key_data"])
+    if method == "fitted-sde":
+        assert after["fit_step"] == args.fit_steps
+        assert len((directory / "fit-progress.jsonl").read_text().splitlines()) == args.fit_steps
+        for old, new in zip(jax.tree.leaves(before["teacher"]), jax.tree.leaves(after["teacher"])):
+            np.testing.assert_array_equal(old, new)
     for old, new in zip(jax.tree.leaves(before["student"]), jax.tree.leaves(after["student"])):
         np.testing.assert_array_equal(old, new)
+
+
+def test_neural_credit_pricing_density_default_and_checkpoint(tmp_path):
+    """Check neural credit law against independent cashflow/likelihood recursions."""
+    config = credit.CreditSDEConfig(n_steps=5, cds_days=2, grid_size=31,
+                                    grid_min=-3.8, grid_max=-3.2)
+    teacher = credit.NeuralCredit(jax.random.key(91), config, width=4, depth=1)
+    contract = credit.market_contract(config)
+    tables = credit.pricing_tables(teacher, config, contract)
+    grid, q_transition = credit.transition_kernel(teacher, config, "Q")
+    np.testing.assert_allclose(np.sum(np.asarray(q_transition), axis=1), 1., atol=2e-6)
+    assert np.all(np.asarray(tables['hazard']) > 0)
+    survival = np.exp(-np.asarray(tables['hazard']) * config.dt)
+    discount = np.exp(-contract.rate * config.dt)
+    bond = np.ones(config.grid_size)
+    for remaining in range(1, config.n_steps + 1):
+        bond = discount * ((1-survival)*contract.recovery + survival*(np.asarray(q_transition) @ bond))
+        np.testing.assert_allclose(tables['bond'][remaining], bond, rtol=2e-6, atol=2e-6)
+    np.testing.assert_allclose(tables['protection'][config.cds_days] -
+        tables['par_spread'] * tables['annuity'][config.cds_days], 0., atol=1e-8)
+    noise = credit.sample_noise(jax.random.key(92), 32, config)
+    paths = credit.simulate(teacher, noise, config)
+    np.testing.assert_allclose(credit.path_log_prob(teacher, paths, config), paths.log_density, atol=2e-5)
+    _, p_transition = credit.transition_kernel(teacher, config)
+    unpacked = credit.unpack_states(paths.states, config)
+    states = np.asarray(unpacked['state'])
+    alive = np.asarray(unpacked['alive'])
+    defaults = np.asarray(unpacked['default'])
+    oracle = np.zeros(32)
+    for day in range(config.n_steps):
+        before, after = states[:, day], states[:, day+1]
+        row = np.where(defaults[:, day], np.log1p(-survival[before]),
+                       np.log(survival[before]) + np.log(np.asarray(p_transition)[before, after]))
+        oracle += np.where(alive[:, day], row, 0.)
+    np.testing.assert_allclose(paths.log_density, oracle, atol=3e-5)
+
+    def score(candidate):
+        """Return fixed-path mean likelihood for the neural credit risk network."""
+        return jnp.mean(credit.path_log_prob(candidate, paths, config))
+
+    gradients = eqx.filter_grad(score)(teacher)
+    assert all(np.isfinite(np.asarray(x)).all() for x in jax.tree.leaves(gradients))
+    assert sum(float(jnp.sum(jnp.abs(x))) for x in jax.tree.leaves(gradients)) > 1e-8
+    forced = credit.simulate(teacher, jnp.ones_like(noise), config)
+    forced_paths = credit.unpack_states(forced.states, config)
+    assert np.asarray(forced_paths['default'][:, 0]).all()
+    assert not np.asarray(forced_paths['alive'][:, 1:]).any()
+    result = credit.rollout(None, forced_paths, tables, contract)
+    np.testing.assert_allclose(result['loss'], result['initial_price'] -
+                               discount*contract.recovery, atol=2e-6)
+    np.testing.assert_allclose(jnp.sum(result['records']['daily_loss'], axis=1), result['loss'], atol=2e-6)
+    checkpoint = tmp_path / "credit-generator.pkl"
+    atomic_checkpoint(checkpoint, teacher)
+    restored = load_checkpoint(checkpoint)
+    np.testing.assert_array_equal(credit.path_log_prob(restored, paths, config),
+                                  credit.path_log_prob(teacher, paths, config))
+
+
+def test_neural_credit_rejects_invalid_pathwise_training(tmp_path):
+    """Reject unsupported gradients through discrete defaults before training starts."""
+    args = SimpleNamespace(problem="credit", credit_simulation="grid", method="pathwise-meta-learning",
+                           output=str(tmp_path), n_steps=3)
+    with pytest.raises(ValueError, match="discrete"):
+        run(args)
+
+
+def test_continuous_credit_default_marginalization_and_metrics(tmp_path):
+    """Compare every default branch to the original ledger and weighted raw metrics."""
+    from credit_hedging.policy import Hedger as CreditHedger
+
+    config = credit_continuous.CreditSDEConfig(n_steps=3, cds_days=2, grid_size=101,
+                                             grid_min=-4., grid_max=-3.)
+    teacher = credit_continuous.NeuralCredit(jax.random.key(101), config, width=4, depth=1)
+    contract = credit_continuous.market_contract(config)
+    tables = credit_continuous.pricing_tables(teacher, config, contract)
+    policy = CreditHedger(jax.random.key(102), n_vintages=2, hidden_size=4)
+    indices = jnp.array([[50, 51, 49, 52], [50, 48, 51, 50]])
+    states = tables['grid'][indices][..., None]
+    paths = SimpleNamespace(states=states)
+    result = credit_continuous.default_branches(policy, paths, tables, contract, config)
+    log_probability = np.asarray(result['log_probability'])
+    factors = np.asarray(states[..., 0])
+    survival = np.exp(-np.logaddexp(0., factors[:, :-1])*config.dt)
+    expected_weights = np.empty((2, 4))
+    preceding = np.ones(2)
+    for day in range(3):
+        expected_weights[:, day] = preceding*(1-survival[:, day])
+        preceding *= survival[:, day]
+    expected_weights[:, -1] = preceding
+    np.testing.assert_allclose(np.exp(log_probability), expected_weights, atol=3e-7)
+    np.testing.assert_allclose(np.exp(log_probability).sum(axis=1), 1., atol=2e-6)
+    daily = []
+    for event in range(4):
+        alive = jnp.broadcast_to(jnp.arange(4)[None, :] <= event, (2, 4))
+        defaults = jnp.broadcast_to(jnp.arange(3)[None, :] == event, (2, 3))
+        ledger = credit.rollout(policy, dict(state=indices, alive=alive, default=defaults), tables, contract)
+        np.testing.assert_allclose(result['event_loss'][:, event], ledger['loss'], atol=3e-6)
+        np.testing.assert_allclose(jnp.sum(ledger['records']['daily_loss'], axis=1), ledger['loss'], atol=3e-6)
+        daily.append(np.asarray(ledger['records']['daily_loss']))
+    daily = np.stack(daily, axis=1)
+    mean = np.sum(expected_weights[..., None]*daily)/(2*3)
+    second = np.sum(expected_weights[..., None]*daily**2)/(2*3)
+    np.testing.assert_allclose(result['daily_error_std'], np.sqrt(max(second-mean**2, 0)), atol=3e-6)
+    conditional, metrics = credit_continuous.feedback_metrics(policy, paths, tables, contract, config)
+    raw = np.asarray(result['event_loss'])
+    expected_entropic = np.log(np.sum(expected_weights*np.exp(10*raw))/2)/10
+    np.testing.assert_allclose(metrics['entropic'], expected_entropic, atol=3e-6)
+    raw_mean = np.sum(expected_weights*raw)/2
+    np.testing.assert_allclose(metrics['terminal_std'], np.sqrt(np.sum(expected_weights*(raw-raw_mean)**2)/2), atol=3e-6)
+    order = np.argsort(raw.reshape(-1))[::-1]
+    weights = expected_weights.reshape(-1)[order]/2
+    tail = np.minimum(weights, np.maximum(.05-(np.cumsum(weights)-weights), 0.))
+    np.testing.assert_allclose(metrics['cvar95'], np.sum(tail*raw.reshape(-1)[order])/.05, atol=3e-6)
+    np.testing.assert_allclose(conditional, credit_continuous.terminal_losses(policy, paths, tables, contract, config), atol=1e-7)
+    generated = credit_continuous.simulate(teacher, credit_continuous.sample_noise(jax.random.key(103), 8, config), config)
+    np.testing.assert_allclose(credit_continuous.path_log_prob(teacher, generated, config), generated.log_density, atol=3e-5)
+
+    def score(candidate):
+        """Return mean stopped-path likelihood for the full continuous teacher."""
+        return jnp.mean(credit_continuous.path_log_prob(candidate, generated, config))
+
+    gradients = eqx.filter_grad(score)(teacher)
+    assert all(np.isfinite(np.asarray(x)).all() for x in jax.tree.leaves(gradients))
+    assert sum(float(jnp.sum(jnp.abs(x))) for x in jax.tree.leaves(gradients.diffusion_network)) > 1e-7
+    checkpoint = tmp_path / "continuous-credit.pkl"
+    atomic_checkpoint(checkpoint, teacher)
+    restored = load_checkpoint(checkpoint)
+    np.testing.assert_array_equal(credit_continuous.path_log_prob(restored, generated, config),
+                                  credit_continuous.path_log_prob(teacher, generated, config))
+
+
+def test_continuous_credit_pathwise_gradient_through_default_and_adam():
+    """Check diffusion->default-integrated credit loss->Adam->target derivative by FD."""
+    config = credit_continuous.CreditSDEConfig(n_steps=5, cds_days=2, grid_size=101,
+                                             grid_min=-4., grid_max=-3.)
+    teacher = credit_continuous.NeuralCredit(jax.random.key(111), config, width=4, depth=1)
+    params, static = eqx.partition(teacher, eqx.is_inexact_array)
+    contract = credit_continuous.market_contract(config)
+    tables = credit_continuous.pricing_tables(teacher, config, contract)
+    noise = credit_continuous.sample_noise(jax.random.key(112), 8, config)
+    optimizer = optax.adam(.1, eps_root=.1)
+    initial = jnp.array(0.)
+    student = (initial, optimizer.init(initial))
+
+    def block(state, states, unused_key):
+        """Fit a scalar student to default-integrated losses with two Adam updates."""
+        losses = credit_continuous.terminal_losses(None, SimpleNamespace(states=states), tables, contract, config)
+
+        def update(carry, unused):
+            """Apply Adam to squared distance from the conditional credit targets."""
+            value, moments = carry
+            gradient = 2*(value-jnp.mean(losses))
+            chex.assert_shape(gradient, ())
+            updates, moments = optimizer.update(gradient, moments, value)
+            value = optax.apply_updates(value, updates)
+            chex.assert_shape(value, ())
+            return (value, moments), None
+
+        trained, _ = jax.lax.scan(update, state, None, length=2)
+        return trained
+
+    def objective(shift):
+        """Return target improvement after perturbing the neural diffusion bias."""
+        candidate = eqx.tree_at(lambda p: p.diffusion_network.layers[-1].bias,
+            params, params.diffusion_network.layers[-1].bias+shift)
+        loss, _ = pathwise_meta_learning(eqx.combine(candidate, static), student, noise,
+            jax.random.key(113), lambda model, z: credit_continuous.simulate(model, z, config),
+            block, lambda state: (state[0]-.1)**2)
+        return loss
+
+    compiled = jax.jit(jax.value_and_grad(objective))
+    value, derivative = compiled(jnp.array(0.))
+    plus, _ = compiled(jnp.array(.01))
+    minus, _ = compiled(jnp.array(-.01))
+    assert np.isfinite(float(value)) and np.isfinite(float(derivative))
+    assert abs(float(derivative)) > 1e-10
+    np.testing.assert_allclose(derivative, (plus-minus)/.02, rtol=.15, atol=3e-7)
+
+
+def test_gaussian_fit_loss_uses_every_transition_and_log_determinant(small_model):
+    """Compare fitting NLL against an independent Gaussian calculation on every step."""
+    config, model = small_model
+    paths = simulate(model, sample_noise(jax.random.key(947), 4, config), config)
+    params, static = eqx.partition(model, eqx.is_inexact_array)
+    expected = []
+    for time_index in range(config.n_steps):
+        before, after = paths.states[:, time_index], paths.states[:, time_index + 1]
+        drift, lower = transition_coefficients(model, before, jnp.asarray(time_index * config.dt), config)
+        covariance = np.asarray(lower) @ np.swapaxes(np.asarray(lower), -1, -2) * config.dt
+        residual = np.asarray(after - before - config.dt * drift)
+        quadratic = np.einsum("bi,bij,bj->b", residual, np.linalg.inv(covariance), residual)
+        _, logdet = np.linalg.slogdet(covariance)
+        expected.append(.5 * (config.state_dim * np.log(2*np.pi) + logdet + quadratic))
+    actual, gradient = jax.value_and_grad(gaussian_fit_loss)(params, static, paths.states, config)
+    np.testing.assert_allclose(actual, np.mean(expected), rtol=2e-5, atol=2e-5)
+    assert np.isfinite(float(optax.global_norm(gradient)))
+    assert float(optax.global_norm(gradient.diffusion_network)) > 0

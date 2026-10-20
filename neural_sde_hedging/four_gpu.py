@@ -17,6 +17,8 @@ import subprocess
 import sys
 import time
 
+from .runtime import require_enabled
+
 
 METHODS = ("baseline", "dpg", "soar", "selfplay")
 
@@ -96,6 +98,7 @@ def disk_bytes(root):
 
 def run_jobs(config, jobs, deadline):
     """Run (name, GPU UUID, argv) jobs concurrently; export and enforce resource limits."""
+    require_enabled()
     root = Path(config["output"])
     children = []
     last_export = 0.
@@ -150,11 +153,12 @@ def training_jobs(config, phase):
     for method, gpu in zip(METHODS, config["gpus"], strict=True):
         profile = config.get("hyperparameters", {}).get(method, {})
         argv = [config["python"], "-m", "neural_sde_hedging.training",
-                "--method", method, "--output", str(root / phase / method),
+                "--method", method, "--problem", config["problem"],
+                "--credit-simulation", config["credit_simulation"], "--output", str(root / phase / method),
                 "--seconds", str(seconds), "--rounds",
                 str(config["calibration_rounds"] if phase == "calibration" else 1000000),
                 "--seed", "20261017", "--groups", "4", "--items", str(profile.get("items", 32)),
-                "--inner-steps", "8", "--n-steps", "126", "--gamma", "10",
+                "--inner-steps", "8", "--n-steps", str(1260 if config["problem"] == "credit" else 126), "--gamma", "10",
                 "--student-lr", str(profile.get("student_lr", .0003)),
                 "--teacher-lr", str(profile.get("teacher_lr", .001)),
                 "--warmup-steps", str(profile.get("warmup_steps", 32)), "--weight-decay", "0.01",
@@ -244,6 +248,7 @@ def supervise(config):
 
 def launch(args):
     """Validate allocation/budget, snapshot code, and detach supervisor plus watchdog."""
+    require_enabled()
     root = Path(args.output).resolve()
     if root.exists():
         raise ValueError("Use a new output directory for each campaign")
@@ -299,6 +304,8 @@ def launch(args):
     code.mkdir()
     source = Path(__file__).resolve().parent
     shutil.copytree(source, code / source.name, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(source.parent / "credit_hedging", code / "credit_hedging",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     (code / "tests").mkdir()
     shutil.copy2(source.parent / "tests/test_neural_sde_gpu.py", code / "tests")
     feedback = None
@@ -356,6 +363,8 @@ def main():
     command.add_argument("--max-artifact-gb", type=float, default=10.)
     command.add_argument("--export-interval", type=float, default=60.)
     command.add_argument("--feedback-paths")
+    command.add_argument("--problem", choices=("options", "credit"), default="options")
+    command.add_argument("--credit-simulation", choices=("continuous", "grid"), default="continuous")
     command.add_argument("--validation-paths")
     command.add_argument("--hyperparameter-profile", help="Per-method JSON from hyperparameter validation")
     for mode in ("supervise", "watchdog"):

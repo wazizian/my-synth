@@ -19,7 +19,14 @@ def teacher_layout(specification):
     every numerical value is replaced with the saved snapshot before use.
     """
     n_latent, width, depth = specification
-    template = NeuralSDE(jax.random.key(0), SDEConfig(n_latent=n_latent), width, depth)
+    if n_latent == "credit-continuous":
+        from .credit_continuous import CreditSDEConfig, NeuralCredit
+        template = NeuralCredit(jax.random.key(0), CreditSDEConfig(), width, depth)
+    elif n_latent == "credit":
+        from .credit import CreditSDEConfig, NeuralCredit
+        template = NeuralCredit(jax.random.key(0), CreditSDEConfig(), width, depth)
+    else:
+        template = NeuralSDE(jax.random.key(0), SDEConfig(n_latent=n_latent), width, depth)
     return eqx.partition(template, eqx.is_inexact_array)
 
 
@@ -40,6 +47,27 @@ class CheckpointPickler(pickle.Pickler):
 
     def reducer_override(self, value):
         """Reduce a NeuralSDE to a versioned architecture and host arrays; defer others."""
+        if (type(value).__module__ == "neural_sde_hedging.credit_continuous"
+                and type(value).__name__ == "NeuralCredit"):
+            networks = (value.q_drift, value.diffusion_network, value.risk_price)
+            if all(net.activation is None and net.final_activation is None for net in networks):
+                return NotImplemented
+            width, depth = networks[0].width_size, networks[0].depth
+            if any(net.width_size != width or net.depth != depth for net in networks):
+                raise ValueError("Inconsistent continuous credit architecture")
+            specification = ("credit-continuous", width, depth)
+            params = eqx.filter(value, eqx.is_inexact_array)
+            arrays = [np.asarray(jax.device_get(leaf)) for leaf in jax.tree.leaves(params)]
+            return restore_saved_teacher, (specification, arrays)
+        if (type(value).__module__ == "neural_sde_hedging.credit"
+                and type(value).__name__ == "NeuralCredit"):
+            network = value.risk_price
+            if network.activation is None and network.final_activation is None:
+                return NotImplemented
+            specification = ("credit", network.width_size, network.depth)
+            params = eqx.filter(value, eqx.is_inexact_array)
+            arrays = [np.asarray(jax.device_get(leaf)) for leaf in jax.tree.leaves(params)]
+            return restore_saved_teacher, (specification, arrays)
         if isinstance(value, NeuralSDE):
             networks = (value.latent_q_drift, value.diffusion_network, value.risk_price)
             # Parameters and Adam moment trees share the module type but have

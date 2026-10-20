@@ -36,6 +36,9 @@ from .replay import ProgramBank, build_pool, niche_of_path
 from .metrics import risk_metrics
 
 
+from .runtime import require_enabled
+
+
 def entropic(losses, weights, gamma):
     """Return weighted empirical entropic risk from losses/positive weights [B]."""
     batch = losses.shape[0]
@@ -48,7 +51,7 @@ def entropic(losses, weights, gamma):
 
 
 def learner_block(student, states, weights, static, optimizer, contract,
-                  gamma, steps, key):
+                  gamma, steps, key, losses_fn=terminal_losses):
     """Return full student PyTree after differentiable clipped-Adam updates.
 
     Inputs: student=(array parameters, actual optimizer state), states with
@@ -71,8 +74,9 @@ def learner_block(student, states, weights, static, optimizer, contract,
 
         def objective(candidate):
             """Return weighted risk of candidate on the fixed synthetic data."""
-            observable = SimpleNamespace(log_spot=flat_states[order, :, 0])
-            losses = terminal_losses(eqx.combine(candidate, static), observable, contract)
+            observable = SimpleNamespace(log_spot=flat_states[order, :, 0],
+                                         states=flat_states[order])
+            losses = losses_fn(eqx.combine(candidate, static), observable, contract)
             chex.assert_shape(losses, (batch,))
             return entropic(losses, flat_weights[order], gamma)
 
@@ -83,6 +87,21 @@ def learner_block(student, states, weights, static, optimizer, contract,
 
     result, _ = jax.lax.scan(jax.checkpoint(step), student, jax.random.split(key, steps))
     return result
+
+
+def gaussian_fit_loss(params, static, states, config, density_fn=path_log_prob):
+    """Return mean Gaussian transition NLL from parameters and full states [B,T+1,D].
+
+    Normalize complete Euler path scores by the number of daily transitions;
+    diffusion log determinants are included. Initial-state density is excluded.
+    """
+    batch = states.shape[0]
+    chex.assert_shape(states, (batch, config.n_steps + 1, config.state_dim))
+    scores = density_fn(eqx.combine(params, static), SimpleNamespace(states=states), config)
+    chex.assert_shape(scores, (batch,))
+    loss = -jnp.mean(scores) / config.n_steps
+    chex.assert_shape(loss, ())
+    return loss
 
 
 def atomic_checkpoint(path, payload):
@@ -133,7 +152,7 @@ def restore_layout(loaded, template):
 
 
 def teacher_loss(params, static, pool, config, method, behavior, reference,
-                 rewards, mutation_mask):
+                 rewards, mutation_mask, density_fn=path_log_prob):
     """Return method-specific teacher loss/metrics on fixed sampled paths.
 
     Inputs include array parameters, static teacher architecture, joint paths,
@@ -141,7 +160,7 @@ def teacher_loss(params, static, pool, config, method, behavior, reference,
     scalar objective and scalar diagnostic dictionary. Score only path density;
     never backpropagate into the sampled trajectory or learner reward.
     """
-    logp = path_log_prob(eqx.combine(params, static), pool, config)
+    logp = density_fn(eqx.combine(params, static), pool, config)
     if method == "selfplay":
         return selfplay_objective(logp, behavior, reference, rewards, mutation_mask)
     group, items = behavior.shape
@@ -155,8 +174,33 @@ def teacher_loss(params, static, pool, config, method, behavior, reference,
 
 def run(args):
     """Run one method/initialization on GPU; resume every learner/teacher/RNG state."""
+    require_enabled()
     if jax.default_backend() != "gpu":
         raise RuntimeError("Only Ruff and py_compile are authorized locally; training requires GPU")
+    args.hard_paths = getattr(args, "hard_paths", None)
+    args.fit_steps = getattr(args, "fit_steps", 1000)
+    args.fit_batch_size = getattr(args, "fit_batch_size", 32)
+    args.problem = getattr(args, "problem", "options")
+    args.cds_days = getattr(args, "cds_days", 126)
+    args.credit_grid_size = getattr(args, "credit_grid_size", 601)
+    args.credit_simulation = getattr(args, "credit_simulation", "continuous")
+    if args.credit_simulation not in ("continuous", "grid"):
+        raise ValueError("Unknown credit simulation")
+    if args.problem not in ("options", "credit"):
+        raise ValueError("Unknown hedging problem")
+    if args.problem == "credit" and args.credit_simulation == "grid" and args.method == "pathwise-meta-learning":
+        raise ValueError("Credit grid transitions/defaults are discrete; pathwise gradients are invalid")
+    if args.method == "fitted-sde":
+        if not args.hard_paths or not getattr(args, "validation_paths", None):
+            raise ValueError("fitted-sde requires --hard-paths and independent --validation-paths")
+        if args.problem == "credit" and args.credit_simulation != "continuous":
+            raise ValueError("Gaussian fitting requires continuous credit states")
+        if not args.feedback_paths:
+            args.feedback_paths = args.hard_paths
+        if min(args.fit_steps, args.fit_batch_size) < 1:
+            raise ValueError("Positive fit steps and batch size required")
+    if args.n_steps is None:
+        args.n_steps = 1260 if args.problem == "credit" else 126
     # Defaults keep programmatic callers compatible; persist them in the fingerprint.
     args.validation_size = getattr(args, "validation_size", 2048)
     args.validation_every = getattr(args, "validation_every", 16)
@@ -177,17 +221,42 @@ def run(args):
         raise ValueError("Warmup steps and weight decay must be nonnegative")
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
-    config = SDEConfig(n_steps=args.n_steps)
-    contract = Contract(payoff_cap=args.payoff_cap, premium=args.premium)
+    simulator, density_fn, noise_fn = simulate, path_log_prob, sample_noise
+    loss_fn = terminal_losses
+    if args.problem == "credit":
+        if args.credit_simulation == "continuous":
+            from . import credit_continuous as credit
+        else:
+            from . import credit
+        from credit_hedging.policy import Hedger as CreditHedger
+        config = credit.CreditSDEConfig(n_steps=args.n_steps, cds_days=args.cds_days,
+                                        grid_size=args.credit_grid_size)
+        contract = credit.market_contract(config)
+        learner = CreditHedger(jax.random.key(args.seed), n_vintages=config.cds_days)
+        prior = credit.NeuralCredit(jax.random.key(args.seed + 1), config)
+        tables = credit.pricing_tables(prior, config, contract)
+        simulator, density_fn, noise_fn = credit.simulate, credit.path_log_prob, credit.sample_noise
+
+        def loss_fn(policy, paths, unused_contract):
+            """Return neural credit losses using common fixed-Q CDS pricing tables."""
+            if args.credit_simulation == "continuous":
+                return credit.terminal_losses(policy, paths, tables, contract, config, args.gamma)
+            return credit.terminal_losses(policy, paths, tables, contract, config)
+    else:
+        config = SDEConfig(n_steps=args.n_steps)
+        contract = Contract(payoff_cap=args.payoff_cap, premium=args.premium)
+        learner = Hedger(jax.random.key(args.seed))
+        prior = NeuralSDE(jax.random.key(args.seed + 1), config)
     configuration = vars(args) | {"sde": asdict(config), "contract": asdict(contract)}
     source_hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.glob("*.py")}
+    if args.problem == "credit":
+        source_hashes |= {"credit_hedging/" + p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                          for p in (Path(__file__).parent.parent / "credit_hedging").glob("*.py")}
     configuration["source_hashes"] = source_hashes
     fingerprint = hashlib.sha256(json.dumps(configuration, sort_keys=True).encode()).hexdigest()
     if not (out / "configuration.json").exists():
         (out / "configuration.json").write_text(json.dumps(configuration, indent=2) + "\n")
-    learner = Hedger(jax.random.key(args.seed))
     initial_params, learner_static = eqx.partition(learner, eqx.is_inexact_array)
-    prior = NeuralSDE(jax.random.key(args.seed + 1), config)
     teacher_params, teacher_static = eqx.partition(prior, eqx.is_inexact_array)
     def learner_rate(count):
         """Return current linear-warmup then constant learning rate from update count."""
@@ -243,10 +312,29 @@ def run(args):
             validation_states = jnp.asarray(data["states"])
     else:
         validation_hash = "independent-neural-sde-prior-validation"
-        validation_states = simulate(prior, sample_noise(jax.random.key(args.seed + 3), args.validation_size, config), config).states
+        validation_states = simulator(prior, noise_fn(jax.random.key(args.seed + 3), args.validation_size, config), config).states
     chex.assert_shape(validation_states, (validation_states.shape[0], config.n_steps + 1, config.state_dim))
     if validation_states.shape[0] < 1:
         raise ValueError("Validation must contain at least one path")
+    hard_population = None
+    if args.method == "fitted-sde":
+        hard_file = Path(args.hard_paths)
+        hard_hash = hashlib.sha256(hard_file.read_bytes()).hexdigest()
+        if hard_hash == validation_hash:
+            raise ValueError("Hard fitting and validation files must differ")
+        if state.get("hard_hash", hard_hash) != hard_hash:
+            raise RuntimeError("Hard fitting dataset changed during resume")
+        with np.load(hard_file, allow_pickle=False) as data:
+            hard_population = jnp.asarray(data["states"])
+        chex.assert_shape(hard_population, (hard_population.shape[0], config.n_steps + 1, config.state_dim))
+        if hard_population.shape[0] < 1 or not bool(jnp.all(jnp.isfinite(hard_population))):
+            raise ValueError("Hard fitting states must be nonempty and finite")
+        initial = simulator(prior, noise_fn(jax.random.key(args.seed + 4), 1, config), config).states[0, 0]
+        if not bool(jnp.all(jnp.isclose(hard_population[:, 0], initial))):
+            raise ValueError("Hard fitting paths must use the simulator's fixed initial state")
+        state["hard_hash"] = hard_hash
+        state.setdefault("fit_step", 0)
+
     for name, identity in (("feedback_hash", feedback_hash), ("validation_hash", validation_hash)):
         if name in state and state[name] != identity:
             raise RuntimeError("Target dataset changed during resume")
@@ -254,15 +342,24 @@ def run(args):
 
     def target(student, target_states):
         """Return entropic risk on an explicit shared target batch [B,T,D]."""
-        losses = terminal_losses(eqx.combine(student[0], learner_static),
-                                 SimpleNamespace(log_spot=target_states[..., 0]), contract)
+        losses = loss_fn(eqx.combine(student[0], learner_static),
+                                 SimpleNamespace(log_spot=target_states[..., 0], states=target_states), contract)
         return entropic(losses, jnp.ones_like(losses), args.gamma)
 
     def feedback_metrics(student, target_states):
         """Return target risks and diagnostics of finite-sample tail concentration."""
-        losses = terminal_losses(eqx.combine(student[0], learner_static),
-                                 SimpleNamespace(log_spot=target_states[..., 0]), contract)
-        result = risk_metrics(losses, args.gamma)
+        policy = eqx.combine(student[0], learner_static)
+        if args.problem == "credit" and args.credit_simulation == "continuous":
+            losses, result = credit.feedback_metrics(policy,
+                SimpleNamespace(states=target_states), tables, contract, config, args.gamma)
+        elif args.problem == "credit":
+            credit_result = credit.rollout(policy, credit.unpack_states(target_states, config), tables, contract)
+            losses = credit_result['loss']
+            result = risk_metrics(losses, args.gamma,
+                                  daily_marked_errors=credit_result['records']['daily_loss'])
+        else:
+            losses = loss_fn(policy, SimpleNamespace(log_spot=target_states[..., 0], states=target_states), contract)
+            result = risk_metrics(losses, args.gamma)
         batch = losses.shape[0]
         chex.assert_shape(losses, (batch,))
         weights = jax.nn.softmax(args.gamma * losses)
@@ -279,15 +376,27 @@ def run(args):
     def block(student, states, weights, key):
         """Run a differentiable inner block using the common student architecture."""
         return learner_block(student, states, weights, learner_static,
-                             learner_optimizer, contract, args.gamma, args.inner_steps, key)
+                             learner_optimizer, contract, args.gamma, args.inner_steps, key, losses_fn=loss_fn)
 
     # Compilation occurs only at these top-level workflow boundaries.
     compiled_block = eqx.filter_jit(block)
     compiled_target = eqx.filter_jit(target)
     compiled_metrics = eqx.filter_jit(feedback_metrics)
-    compiled_density = eqx.filter_jit(lambda teacher, paths: path_log_prob(teacher, paths, config))
-    compiled_simulate = eqx.filter_jit(simulate)
-    compiled_teacher_gradient = eqx.filter_jit(jax.value_and_grad(teacher_loss, has_aux=True))
+    compiled_density = eqx.filter_jit(lambda teacher, paths: density_fn(teacher, paths, config))
+    compiled_simulate = eqx.filter_jit(simulator)
+    def adapter_teacher_loss(params, static, paths, sde_config, method, behavior, reference, rewards, mutation_mask):
+        """Return teacher objective using this problem's complete path likelihood."""
+        return teacher_loss(params, static, paths, sde_config, method, behavior,
+                            reference, rewards, mutation_mask, density_fn=density_fn)
+
+    compiled_teacher_gradient = eqx.filter_jit(jax.value_and_grad(adapter_teacher_loss, has_aux=True))
+
+    def execute_adapter(program, noise, sde_config, reference_model):
+        """Execute and score an archived neural generator for this hedging problem."""
+        paths = simulator(program, noise, sde_config)
+        return paths, density_fn(program, paths, sde_config), density_fn(reference_model, paths, sde_config)
+
+    compiled_execute = eqx.filter_jit(execute_adapter)
 
     def attributed_round(datasets, key, target_states):
         """Run one reset DPG inner calculation on grouped datasets and RNG key."""
@@ -308,7 +417,7 @@ def run(args):
 
         def values(candidate):
             """Return raw losses for current learner on the full mixed round pool."""
-            return terminal_losses(eqx.combine(candidate, learner_static), pool, contract)
+            return loss_fn(eqx.combine(candidate, learner_static), pool, contract)
 
         return selfplay_rewards(student[0], historical, adam.nu, adam.count,
                                 learner_rate(adam.count), values, entropic_gamma=args.gamma,
@@ -323,14 +432,40 @@ def run(args):
         teacher = eqx.combine(params, teacher_static)
         return pathwise_meta_learning(
             teacher, student, noise, key,
-            lambda model, z: simulate(model, z, config),
+            lambda model, z: simulator(model, z, config),
             lambda s, data, k: block(s, data, jnp.ones((data.shape[0],)), k),
             lambda s: target(s, target_states))
 
     compiled_pathwise_gradient = eqx.filter_jit(
         jax.value_and_grad(pathwise_round, has_aux=True))
     resumed_seconds = state["seconds"]
-    while state["round_index"] < args.rounds and resumed_seconds + time.monotonic() - began < args.seconds:
+    # Fit only on hard training data; validation never enters the likelihood.
+    fit_gradient = eqx.filter_jit(jax.value_and_grad(
+        lambda params, states: gaussian_fit_loss(params, teacher_static, states, config, density_fn)))
+    while (args.method == "fitted-sde" and state["fit_step"] < args.fit_steps
+           and resumed_seconds + time.monotonic() - began < args.seconds):
+        if shutil.disk_usage(out).free < args.min_free_gb * 1024**3:
+            raise RuntimeError("Storage reserve reached during SDE fit")
+        next_key, fit_key = jax.random.split(jax.random.wrap_key_data(state["key_data"]))
+        indices = jax.random.randint(fit_key, (args.fit_batch_size,), 0, hard_population.shape[0])
+        chex.assert_shape(indices, (args.fit_batch_size,))
+        nll, gradient = fit_gradient(state["teacher"], hard_population[indices])
+        updates, moments = teacher_optimizer.update(gradient, state["teacher_optimizer"], state["teacher"])
+        candidate = optax.apply_updates(state["teacher"], updates)
+        if any(not bool(jnp.all(jnp.isfinite(v))) for v in jax.tree.leaves((nll, gradient, candidate, moments))):
+            raise RuntimeError("Nonfinite Gaussian fit; previous checkpoint preserved")
+        state.update(teacher=candidate, teacher_optimizer=moments,
+                     fit_step=state["fit_step"] + 1, key_data=jax.random.key_data(next_key),
+                     seconds=resumed_seconds + time.monotonic() - began)
+        atomic_checkpoint(latest, state)
+        with (out / "fit-progress.jsonl").open("a") as stream:
+            stream.write(json.dumps({"fit_step": state["fit_step"], "transition_nll": float(nll),
+                                     "seconds": state["seconds"]}, allow_nan=False) + "\n")
+    if args.method == "fitted-sde" and state["fit_step"] >= args.fit_steps:
+        fitted_path = out / "fitted-generator.pkl"
+        if not fitted_path.exists():
+            atomic_checkpoint(fitted_path, eqx.combine(state["teacher"], teacher_static))
+    while (args.method != "fitted-sde" or state["fit_step"] >= args.fit_steps) and state["round_index"] < args.rounds and resumed_seconds + time.monotonic() - began < args.seconds:
         if shutil.disk_usage(out).free < args.min_free_gb * 1024**3:
             raise RuntimeError("Storage reserve reached; preserve checkpoint and export before resuming")
         round_index = state["round_index"]
@@ -339,7 +474,7 @@ def run(args):
         # One target batch per round, independent of teacher-generated training data.
         if feedback_population is None:
             feedback_states = compiled_simulate(
-                prior, sample_noise(feedback_key, args.feedback_size, config), config).states
+                prior, noise_fn(feedback_key, args.feedback_size, config), config).states
         else:
             indices = jax.random.choice(feedback_key, feedback_population.shape[0],
                                         (args.feedback_size,), replace=False)
@@ -350,7 +485,7 @@ def run(args):
         student_before = state["student"]
         metrics = {}
         if args.method == "pathwise-meta-learning":
-            noise = sample_noise(draw_key, args.groups * args.items, config)
+            noise = noise_fn(draw_key, args.groups * args.items, config)
             ((objective_value, (student, pool, before_risk)), gradient) = compiled_pathwise_gradient(
                 state["teacher"], student_before, noise, inner_key, feedback_states)
             rewards = jnp.reshape(-objective_value, (1,))
@@ -368,7 +503,8 @@ def run(args):
             old_params = restore_layout(load_checkpoint(old_path), initial_params)
             pool, behavior, reference, sources, programs = build_pool(
                 teacher, prior, state["bank"], draw_key, config,
-                args.groups * args.items, round_index, host_seed=args.seed)
+                args.groups * args.items, round_index, host_seed=args.seed,
+                execute_fn=compiled_execute, noise_fn=noise_fn)
             rewards = compiled_alignment(student_before, old_params, pool)
             mutation_mask = jnp.array([source == "mutation" for source in sources])
             chex.assert_shape(mutation_mask, (args.groups * args.items,))
@@ -381,12 +517,12 @@ def run(args):
             apply_teacher = round_index > 0
         else:
             batch = args.groups * args.items
-            pool = compiled_simulate(teacher, sample_noise(draw_key, batch, config), config)
+            pool = compiled_simulate(teacher, noise_fn(draw_key, batch, config), config)
             behavior = jax.lax.stop_gradient(pool.log_density).reshape((args.groups, args.items))
             reference = compiled_density(prior, pool).reshape((args.groups, args.items))
             datasets = jax.lax.stop_gradient(pool.states).reshape((args.groups, args.items, config.n_steps + 1, config.state_dim))
             chex.assert_shape(datasets, (args.groups, args.items, config.n_steps + 1, config.state_dim))
-            if args.method == "baseline":
+            if args.method in ("baseline", "fitted-sde"):
                 student = compiled_block(student_before, pool.states,
                                          jnp.ones((batch,)), inner_key)
                 rewards = jnp.zeros((batch,))
@@ -409,9 +545,9 @@ def run(args):
                 metrics["reward_mean"] = jnp.mean(rewards)
                 metrics["promotion_smoothed_reward"] = state["ema"]
 
-            apply_teacher = args.method != "baseline"
+            apply_teacher = args.method not in ("baseline", "fitted-sde")
             mutation_mask = jnp.zeros((batch,), dtype=bool)
-        if args.method == "baseline":
+        if args.method in ("baseline", "fitted-sde"):
             objective_value, teacher_metrics, gradient = jnp.array(0.), {}, ()
             candidate_teacher = state["teacher"]
             new_teacher_optimizer = state["teacher_optimizer"]
@@ -465,7 +601,11 @@ def run(args):
 def main():
     """Parse one-seed GPU job configuration and run the selected teacher method."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning"), required=True)
+    parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde"), required=True)
+    parser.add_argument("--problem", choices=("options", "credit"), default="options")
+    parser.add_argument("--cds-days", type=int, default=126)
+    parser.add_argument("--credit-grid-size", type=int, default=601)
+    parser.add_argument("--credit-simulation", choices=("continuous", "grid"), default="continuous")
     parser.add_argument("--output", required=True)
     parser.add_argument("--seconds", type=float, required=True)
     parser.add_argument("--rounds", type=int, default=1000)
@@ -473,13 +613,16 @@ def main():
     parser.add_argument("--groups", type=int, default=4)
     parser.add_argument("--items", type=int, default=32)
     parser.add_argument("--inner-steps", type=int, default=8)
-    parser.add_argument("--n-steps", type=int, default=126)
+    parser.add_argument("--n-steps", type=int, help="Default: 126 options; 1260 credit")
     parser.add_argument("--gamma", type=float, default=10.)
     parser.add_argument("--student-lr", type=float, default=0.0003)
     parser.add_argument("--teacher-lr", type=float, default=0.001)
     parser.add_argument("--warmup-steps", type=int, default=32)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--promotion-threshold", type=float, default=0.0001)
+    parser.add_argument("--hard-paths", help="Full-state hard training NPZ; fitted-sde only")
+    parser.add_argument("--fit-steps", type=int, default=1000)
+    parser.add_argument("--fit-batch-size", type=int, default=32)
     parser.add_argument("--feedback-paths")
     parser.add_argument("--feedback-size", type=int, default=1024)
     parser.add_argument("--validation-paths")

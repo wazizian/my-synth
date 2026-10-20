@@ -66,7 +66,6 @@ def build_tables(config: MarketConfig):
     Returns prices indexed by [remaining_days, latent_state].
     """
     n_states = config.grid_size
-    n_maturities = max(config.bond_days, config.cds_days)
     dt = 1.0 / config.trading_days
     grid = jnp.linspace(config.grid_min, config.grid_max, n_states)
     chex.assert_shape(grid, (n_states,))
@@ -94,6 +93,21 @@ def build_tables(config: MarketConfig):
     row_sum = jnp.sum(transition, axis=1, keepdims=True)
     chex.assert_shape(row_sum, (n_states, 1))
     transition = transition / row_sum
+    chex.assert_shape(transition, (n_states, n_states))
+    return price_tables(grid, hazard, survival, transition, config)
+
+
+def price_tables(grid, hazard, survival, transition, config):
+    """Price the bond and CDS legs from a supplied grid and stochastic kernel.
+
+    Inputs are grid/hazard/survival [states], transition [states,states] and
+    MarketConfig. Output is the same table PyTree as build_tables. This shared
+    recursion keeps the OU and neural-SDE adapters on identical cash conventions.
+    """
+    n_states = config.grid_size
+    n_maturities = max(config.bond_days, config.cds_days)
+    dt = 1.0 / config.trading_days
+    chex.assert_shape((grid, hazard, survival), (n_states,))
     chex.assert_shape(transition, (n_states, n_states))
     discount = jnp.exp(-config.rate * dt)
     chex.assert_shape(discount, ())

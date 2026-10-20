@@ -132,7 +132,7 @@ def execute_program(program, noise, config, prior):
 
 def build_pool(teacher, prior, bank, key, config, batch_size, round_index,
                mutation_fraction=0.25, replay_fraction=0.25, mutation_scale=0.01,
-               host_seed=20261017):
+               host_seed=20261017, execute_fn=execute_program, noise_fn=sample_noise):
     """Return joint paths, behavior/prior densities, sources, and SDE programs.
 
     Fixed total pool size. Missing archive entries fall back to fresh samples.
@@ -159,8 +159,8 @@ def build_pool(teacher, prior, bank, key, config, batch_size, round_index,
         sources.append("fresh")
     paths, behavior, reference = [], [], []
     for index, program in enumerate(programs):
-        noise = sample_noise(keys[batch_size + index], 1, config)
-        path, behavior_density, reference_density = execute_program(program, noise, config, prior)
+        noise = noise_fn(keys[batch_size + index], 1, config)
+        path, behavior_density, reference_density = execute_fn(program, noise, config, prior)
         paths.append(path)
         behavior.append(behavior_density)
         reference.append(reference_density)

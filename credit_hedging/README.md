@@ -191,3 +191,13 @@ grid error. The 301-point default is a finite-grid research model: its local OU
 transition variance is about 4.6% above the continuous OU variance at the initial
 state. A grid/time convergence study is still required before interpreting small
 between-method differences.
+
+## Neural-SDE training adapter
+
+The shared neural-generator runner now supports `--problem credit`; see
+[neural credit documentation](../neural_sde_hedging/CREDIT.md). It uses this
+package's GRU, CDS vintage ledger and pricing recursion with a neural hazard
+continuous proposal model with conditional default integration. Baseline, DPG,
+SOAR, self-play and pathwise meta-learning are connected. The original
+OU `market.py` generator remains available as a separately labelled reference.
+Only static checks have been performed on the new adapter.

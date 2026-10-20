@@ -57,7 +57,7 @@ control-plane disk is unsuitable without making room first.
 | 3 | Self-play | Learned neural-SDE teacher with replay and mutations |
 
 One seed (`20261017`), identical GRU hedger initialization and architecture,
-126-day horizon, capped-call payoff (`--payoff-cap 1`), entropic gamma 10,
+By default: 126-day option horizon, capped-call payoff (`--payoff-cap 1`), entropic gamma 10,
 learner LR 0.0003, teacher LR 0.001, 32-update learner warmup, weight decay 0.01,
 gradient clipping 1, four groups of 32 paths, eight inner updates and 1,024 fresh per-round
 feedback paths, with 2,048 fixed validation paths evaluated every 16 rounds. These are starting settings, not tuned hyperparameters.
@@ -117,3 +117,18 @@ service manager if needed.
 Validation of the new launcher and baseline branch: Ruff and `py_compile` only.
 Their numerical GPU validation occurs in calibration; the preceding eleven-case
 suite covers the previously smoke-tested adaptive methods.
+
+## Credit campaigns
+
+`launch --problem credit` selects the neural hazard generator and a 1,260-day
+ZCB with 126-day CDS. The snapshot includes `credit_hedging/` for the shared
+ledger and GRU. Baseline/DPG/SOAR/self-play use the same credit architecture.
+The generic calibration/budget/export/deletion gates still apply. Full-horizon
+credit cost and memory have not been measured; do not infer that the option
+configuration fits. Validate the credit GPU tests and a bounded full-horizon
+smoke before a scientific campaign. See [CREDIT.md](CREDIT.md).
+
+Credit now defaults to `--credit-simulation continuous`: trainable neural drift
+and diffusion, fixed neural reference quotes, and conditional default-date
+integration. The previous sampled-grid adapter requires `--credit-simulation grid`.
+The four-arm campaign still excludes the separately runnable pathwise method.
