@@ -281,7 +281,7 @@ def test_selfplay_historical_alignment_and_mutation_exclusion():
 def test_complete_training_and_resume(tmp_path, problem, method, credit_simulation, monkeypatch):
     """Run two tiny real GPU rounds per method and verify exact no-reset resume."""
     monkeypatch.setenv("NEURAL_SDE_ENABLED", "1")
-    args = SimpleNamespace(method=method, target_regime="prior", problem=problem, credit_simulation=credit_simulation,
+    args = SimpleNamespace(method=method, market="neural-demo", target_regime="prior", problem=problem, credit_simulation=credit_simulation,
                            cds_days=2, credit_grid_size=301,
                            output=str(tmp_path / method), seconds=600.,
                            rounds=2, seed=20261017, groups=2, items=2, inner_steps=1,
@@ -424,7 +424,7 @@ def test_neural_credit_pricing_density_default_and_checkpoint(tmp_path):
 def test_neural_credit_rejects_invalid_pathwise_training(tmp_path, monkeypatch):
     """Reject unsupported gradients through discrete defaults before training starts."""
     monkeypatch.setenv("NEURAL_SDE_ENABLED", "1")
-    args = SimpleNamespace(problem="credit", credit_simulation="grid", method="pathwise-meta-learning",
+    args = SimpleNamespace(problem="credit", market="neural-demo", credit_simulation="grid", method="pathwise-meta-learning",
                            output=str(tmp_path), n_steps=3)
     with pytest.raises(ValueError, match="discrete"):
         run(args)
@@ -606,7 +606,7 @@ def test_hard_target_pool_fresh_evaluation_and_specialist(tmp_path, monkeypatch,
     else:
         monkeypatch.setenv("NEURAL_SDE_ENABLED", "1")
     regime = "easy" if method == "easy-specialist" else "hard"
-    args = SimpleNamespace(method=method, target_regime=None, hard_pool_size=8,
+    args = SimpleNamespace(method=method, market="neural-demo", target_regime=None, hard_pool_size=8,
                            problem=problem, credit_simulation="continuous", cds_days=2,
                            credit_grid_size=31, output=str(tmp_path / method), seconds=600.,
                            rounds=2, seed=20261017, groups=2, items=2, inner_steps=1,
@@ -653,7 +653,7 @@ def test_hard_target_pool_fresh_evaluation_and_specialist(tmp_path, monkeypatch,
 def test_specialist_rejects_external_pool(tmp_path, method, monkeypatch):
     """Reject relabeling arbitrary supplied paths as a built-in specialist regime."""
     monkeypatch.delenv("NEURAL_SDE_ENABLED", raising=False)
-    args = SimpleNamespace(method=method, target_regime=None, feedback_paths="arbitrary.npz")
+    args = SimpleNamespace(method=method, market="neural-demo", target_regime=None, feedback_paths="arbitrary.npz")
     with pytest.raises(ValueError, match="generated regime pool"):
         run(args)
 
@@ -662,7 +662,7 @@ def test_specialist_rejects_external_pool(tmp_path, method, monkeypatch):
 def test_specialist_interrupted_resume_matches_uninterrupted(tmp_path, monkeypatch, method):
     """Reconstruct the fixed regime pool after interruption and reproduce the final learner."""
     monkeypatch.delenv("NEURAL_SDE_ENABLED", raising=False)
-    args = SimpleNamespace(method=method, target_regime=None, hard_pool_size=8,
+    args = SimpleNamespace(method=method, market="neural-demo", target_regime=None, hard_pool_size=8,
                            problem="options", credit_simulation="continuous", cds_days=2,
                            credit_grid_size=31, output=str(tmp_path / "interrupted"), seconds=600.,
                            rounds=2, seed=20261017, groups=2, items=2, inner_steps=1,

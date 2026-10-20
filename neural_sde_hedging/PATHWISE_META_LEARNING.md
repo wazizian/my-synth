@@ -1,5 +1,7 @@
 # Pathwise meta-learning
 
+The restored distinct credit grid/default law rejects pathwise training. The differentiable one-factor credit experiment is available only under `--market neural-demo`; it is not the historical credit benchmark.
+
 Run on a GPU worker using the existing resumable training entry point:
 
 ```bash

@@ -1,5 +1,7 @@
 # Autonomous four-H100 pilot
 
+The launcher now defaults to `--market distinct`: original markets/hedgers, fresh base baseline and own-domain specialists (separate jobs). Calibration runs both historical-mechanism and new archived-equivalence GPU suites; new resource/timing defaults are not validated.
+
 Current target default: fixed hard training pool, resampled feedback subsets,
 and fresh hard evaluation. See [HARD_REGIME.md](HARD_REGIME.md). The easy and hard specialists
 are two separate arms, run independently of this four-arm launcher. The old

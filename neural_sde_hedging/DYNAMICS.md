@@ -1,5 +1,7 @@
 # Neural SDE teacher
 
+These equations describe the synthetic neural proposal, not the fixed distinct benchmark markets. See [README.md](README.md) for default market laws.
+
 `dynamics.py` replaces three categorical scenario weights with a trainable,
 continuous path law. All latent drifts, all diffusion coefficients, and the
 market price of risk are neural networks. A learner receives log spot history,

@@ -52,7 +52,7 @@ def entropic(losses, weights, gamma):
 
 
 def learner_block(student, states, weights, static, optimizer, contract,
-                  gamma, steps, key, losses_fn=terminal_losses):
+                  gamma, steps, key, losses_fn=terminal_losses, market=None, bootstrap=True):
     """Return full student PyTree after differentiable clipped-Adam updates.
 
     Inputs: student=(array parameters, actual optimizer state), states with
@@ -68,16 +68,19 @@ def learner_block(student, states, weights, static, optimizer, contract,
     chex.assert_shape(flat_weights, (batch,))
 
     def step(carry, subkey):
-        """Apply one bootstrap minibatch update to parameters/moments."""
+        """Apply one weighted update, optionally bootstrapping the supplied minibatch."""
         params, optimizer_state = carry
-        order = jax.random.randint(subkey, (batch,), 0, batch)
+        order = (jax.random.randint(subkey, (batch,), 0, batch) if bootstrap else jnp.arange(batch))
         chex.assert_shape(order, (batch,))
 
         def objective(candidate):
             """Return weighted risk of candidate on the fixed synthetic data."""
             observable = SimpleNamespace(log_spot=flat_states[order, :, 0],
                                          states=flat_states[order])
-            losses = losses_fn(eqx.combine(candidate, static), observable, contract)
+            if market is None:
+                losses = losses_fn(eqx.combine(candidate, static), observable, contract)
+            else:
+                losses = losses_fn(eqx.combine(candidate, static), observable, contract, market)
             chex.assert_shape(losses, (batch,))
             return entropic(losses, flat_weights[order], gamma)
 
@@ -175,13 +178,35 @@ def teacher_loss(params, static, pool, config, method, behavior, reference,
 
 def run(args):
     """Run one method/initialization on GPU; resume every learner/teacher/RNG state."""
-    if args.method not in ("hard-specialist", "easy-specialist"):
+    args.problem = getattr(args, "problem", "options")
+    args.market = getattr(args, "market", "distinct")
+    args.credit_fast_grid_size = getattr(args, "credit_fast_grid_size", None)
+    args.option_cost = getattr(args, "option_cost", .0003)
+    args.option_quote_paths = getattr(args, "option_quote_paths", 4096)
+    args.option_daily_paths = getattr(args, "option_daily_paths", 64)
+    if args.market not in ("distinct", "neural-demo"):
+        raise ValueError("Unknown market adapter")
+    distinct_mode = args.market == "distinct"
+    if (distinct_mode and args.problem == "options"
+            and (getattr(args, "payoff_cap", None) is not None or getattr(args, "premium", 0.) != 0.)):
+        raise ValueError("Distinct options use an uncapped call and per-domain Q premiums; omit payoff-cap/premium overrides")
+    if distinct_mode and (args.option_quote_paths < 2 or args.option_daily_paths < 0):
+        raise ValueError("Quote path count must be >=2; daily count must be nonnegative")
+    if distinct_mode and args.method == "fitted-sde":
+        raise ValueError("Fitted-SDE is paused and not implemented for the distinct benchmark")
+    if distinct_mode and args.problem == "credit" and args.method == "pathwise-meta-learning":
+        raise ValueError("Exact credit grid/default sampling is discrete; pathwise training is unsupported")
+    if args.method not in ("hard-specialist", "easy-specialist") and not (distinct_mode and args.method == "baseline"):
         require_enabled()
     if jax.default_backend() != "gpu":
         raise RuntimeError("Only Ruff and py_compile are authorized locally; training requires GPU")
     args.target_regime = getattr(args, "target_regime", None) or (
         "easy" if args.method == "easy-specialist" else "hard")
+    if distinct_mode:
+        jax.config.update("jax_enable_x64", True)
     args.hard_pool_size = getattr(args, "hard_pool_size", 1024)
+    if distinct_mode and args.target_regime not in ("easy", "hard"):
+        raise ValueError("Distinct benchmark requires an easy or hard target")
     if args.target_regime not in ("easy", "hard", "prior", "external"):
         raise ValueError("Unknown target regime")
     if args.method in ("hard-specialist", "easy-specialist"):
@@ -196,9 +221,8 @@ def run(args):
     args.hard_paths = getattr(args, "hard_paths", None)
     args.fit_steps = getattr(args, "fit_steps", 1000)
     args.fit_batch_size = getattr(args, "fit_batch_size", 32)
-    args.problem = getattr(args, "problem", "options")
     args.cds_days = getattr(args, "cds_days", 126)
-    args.credit_grid_size = getattr(args, "credit_grid_size", 601)
+    args.credit_grid_size = getattr(args, "credit_grid_size", None)
     args.credit_simulation = getattr(args, "credit_simulation", "continuous")
     if args.credit_simulation not in ("continuous", "grid"):
         raise ValueError("Unknown credit simulation")
@@ -215,7 +239,7 @@ def run(args):
             args.feedback_paths = args.hard_paths
         if min(args.fit_steps, args.fit_batch_size) < 1:
             raise ValueError("Positive fit steps and batch size required")
-    if args.target_regime in ("easy", "hard") and args.problem == "credit" and args.credit_simulation != "continuous":
+    if not distinct_mode and args.target_regime in ("easy", "hard") and args.problem == "credit" and args.credit_simulation != "continuous":
         raise ValueError("Easy/hard credit targets require continuous credit simulation")
     if args.n_steps is None:
         args.n_steps = 1260 if args.problem == "credit" else 126
@@ -241,14 +265,38 @@ def run(args):
     out.mkdir(parents=True, exist_ok=True)
     simulator, density_fn, noise_fn = simulate, path_log_prob, sample_noise
     loss_fn = terminal_losses
-    if args.problem == "credit":
+    market = None
+    if distinct_mode:
+        from . import distinct
+        from . import option_benchmark
+        market = distinct.build_market(args, SDEConfig(n_steps=args.n_steps))
+        if args.problem == "credit":
+            from . import credit_benchmark as credit
+            from credit_hedging.learned_policy import TargetHedger
+            config = credit.CreditGridConfig(market.configs[2])
+            contract = market.configs[2]
+            learner = TargetHedger(jax.random.key(args.seed), n_vintages=args.cds_days)
+            prior = credit.NeuralCredit(jax.random.key(args.seed + 1), config)
+            simulator, density_fn, noise_fn = credit.simulate, credit.path_log_prob, credit.sample_noise
+        else:
+            config = SDEConfig(n_steps=args.n_steps)
+            contract = option_benchmark.Contract(cost=args.option_cost)
+            learner = option_benchmark.Hedger(jax.random.key(args.seed))
+            prior = NeuralSDE(jax.random.key(args.seed + 1), config)
+        training_domain = (args.method.removesuffix("-specialist") if args.method.endswith("-specialist")
+                           else "base" if args.method == "baseline" or args.problem == "options" else "hard")
+
+        def loss_fn(policy, paths, unused_contract, pricing):
+            """Return original distinct-market losses on the learner's synthetic/training domain."""
+            return distinct.losses(policy, paths.states, training_domain, pricing)
+    elif args.problem == "credit":
         if args.credit_simulation == "continuous":
             from . import credit_continuous as credit
         else:
             from . import credit
         from credit_hedging.policy import Hedger as CreditHedger
         config = credit.CreditSDEConfig(n_steps=args.n_steps, cds_days=args.cds_days,
-                                        grid_size=args.credit_grid_size)
+                                        grid_size=args.credit_grid_size or 601)
         contract = credit.market_contract(config)
         learner = CreditHedger(jax.random.key(args.seed), n_vintages=config.cds_days)
         prior = credit.NeuralCredit(jax.random.key(args.seed + 1), config)
@@ -270,6 +318,15 @@ def run(args):
     if args.problem == "credit":
         source_hashes |= {"credit_hedging/" + p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in (Path(__file__).parent.parent / "credit_hedging").glob("*.py")}
+    if distinct_mode:
+        configuration["distinct_markets"] = [asdict(value) for value in market.configs]
+        configuration["learner_optimizer"] = {"type": "adam", "clip_norm": 1.,
+                                               "learning_rate": args.student_lr,
+                                               "warmup_steps": 0, "weight_decay": 0.}
+        configuration["training_domain"] = training_domain
+        if args.problem == "credit":
+            data_file = Path(__file__).parent.parent/"credit_hedging"/"configs"/"distinct_regimes.json"
+            source_hashes["credit_hedging/configs/distinct_regimes.json"] = hashlib.sha256(data_file.read_bytes()).hexdigest()
     configuration["source_hashes"] = source_hashes
     fingerprint = hashlib.sha256(json.dumps(configuration, sort_keys=True).encode()).hexdigest()
     if not (out / "configuration.json").exists():
@@ -278,10 +335,13 @@ def run(args):
     teacher_params, teacher_static = eqx.partition(prior, eqx.is_inexact_array)
     def learner_rate(count):
         """Return current linear-warmup then constant learning rate from update count."""
+        if distinct_mode:
+            return jnp.asarray(args.student_lr)
         return args.student_lr * jnp.minimum((count + 1.) / max(args.warmup_steps, 1), 1.)
 
-    learner_optimizer = optax.chain(optax.clip_by_global_norm(1.), optax.adamw(
-        learner_rate, eps_root=1e-16, weight_decay=args.weight_decay))
+    learner_optimizer = (optax.chain(optax.clip_by_global_norm(1.), optax.adam(args.student_lr, eps_root=1e-16))
+                         if distinct_mode else optax.chain(optax.clip_by_global_norm(1.), optax.adamw(
+                             learner_rate, eps_root=1e-16, weight_decay=args.weight_decay)))
     teacher_optimizer = optax.chain(optax.clip_by_global_norm(1.), optax.adamw(
         args.teacher_lr, weight_decay=args.weight_decay))
     initial_student = (initial_params, learner_optimizer.init(initial_params))
@@ -311,8 +371,13 @@ def run(args):
     history = out / "learner-history"
     history.mkdir(exist_ok=True)
     # One immutable hard training pool; per-round subsets and evaluation RNG are separate.
-    compiled_regime = eqx.filter_jit(
-        lambda key, batch, regime: sample_regime(key, batch, config, args.problem, regime))
+    def draw_regime(key, batch, regime, pricing):
+        """Draw benchmark paths from explicit dynamic pricing tables and a fixed domain."""
+        if distinct_mode:
+            return distinct.sample_states(key, batch, config, regime, pricing)
+        return sample_regime(key, batch, config, args.problem, regime)
+
+    compiled_regime = eqx.filter_jit(draw_regime)
     # Only target-training data may feed teacher rewards. Validation is disjoint.
     feedback_population = None
     feedback_hash = "fresh-neural-sde-prior-demonstration"
@@ -329,8 +394,8 @@ def run(args):
             if args.hard_pool_size < max(args.feedback_size, args.groups*args.items):
                 raise ValueError("Regime pool must cover feedback and specialist batches")
             pool_seed = args.seed + (101 if args.target_regime == "hard" else 103)
-            feedback_population = compiled_regime(jax.random.key(pool_seed), args.hard_pool_size, args.target_regime)
-            feedback_hash = f"fixed-{args.target_regime}-training-pool-v1"
+            feedback_population = compiled_regime(jax.random.key(pool_seed), args.hard_pool_size, args.target_regime, market)
+            feedback_hash = f"fixed-{args.target_regime}-training-pool-" + ("distinct-v1" if distinct_mode else "v1")
         if feedback_population.shape[0] < max(args.feedback_size, args.groups*args.items):
             raise ValueError("Regime pool too small")
         if not bool(jnp.all(jnp.isfinite(feedback_population))):
@@ -375,16 +440,22 @@ def run(args):
             raise RuntimeError("Target dataset changed during resume")
         state[name] = identity
 
-    def target(student, target_states):
+    def target(student, target_states, pricing=None):
         """Return entropic risk on an explicit shared target batch [B,T,D]."""
-        losses = loss_fn(eqx.combine(student[0], learner_static),
-                                 SimpleNamespace(log_spot=target_states[..., 0], states=target_states), contract)
+        if distinct_mode:
+            losses = distinct.losses(eqx.combine(student[0], learner_static), target_states, args.target_regime, pricing)
+        else:
+            losses = loss_fn(eqx.combine(student[0], learner_static),
+                            SimpleNamespace(log_spot=target_states[..., 0], states=target_states), contract)
         return entropic(losses, jnp.ones_like(losses), args.gamma)
 
-    def feedback_metrics(student, target_states):
+    def feedback_metrics(student, target_states, pricing=None, domain=None):
         """Return target risks and diagnostics of finite-sample tail concentration."""
         policy = eqx.combine(student[0], learner_static)
-        if args.problem == "credit" and args.credit_simulation == "continuous":
+        if distinct_mode:
+            losses, result = distinct.metrics(policy, target_states, domain or args.target_regime, pricing, args.gamma,
+                                              daily=(domain is not None))
+        elif args.problem == "credit" and args.credit_simulation == "continuous":
             losses, result = credit.feedback_metrics(policy,
                 SimpleNamespace(states=target_states), tables, contract, config, args.gamma)
         elif args.problem == "credit":
@@ -408,13 +479,34 @@ def run(args):
         result["sample_size"] = jnp.asarray(batch)
         return result
 
-    def block(student, states, weights, key):
+    def block(student, states, weights, key, pricing=None):
         """Run a differentiable inner block using the common student architecture."""
         return learner_block(student, states, weights, learner_static,
-                             learner_optimizer, contract, args.gamma, args.inner_steps, key, losses_fn=loss_fn)
+                             learner_optimizer, contract, args.gamma, args.inner_steps, key, losses_fn=loss_fn, market=pricing)
+
+    def fresh_block(student, key, pricing):
+        """Train baseline/specialist on new own-domain simulations for every optimizer update."""
+        batch = args.groups * args.items
+        initial_paths = jnp.zeros((batch, config.n_steps+1, config.state_dim))
+        chex.assert_shape(initial_paths, (batch, config.n_steps+1, config.state_dim))
+        keys = jax.random.split(key, args.inner_steps)
+
+        def step(index, carry):
+            """Sample an independent full batch and apply exactly one unbootstrapped Adam update."""
+            current, _ = carry
+            draw, update_key = jax.random.split(keys[index])
+            paths = draw_regime(draw, batch, training_domain, pricing)
+            chex.assert_shape(paths, (batch, config.n_steps+1, config.state_dim))
+            updated = learner_block(current, paths, jnp.ones(batch), learner_static,
+                learner_optimizer, contract, args.gamma, 1, update_key,
+                losses_fn=loss_fn, market=pricing, bootstrap=False)
+            return updated, paths
+
+        return jax.lax.fori_loop(0, args.inner_steps, step, (student, initial_paths))
 
     # Compilation occurs only at these top-level workflow boundaries.
     compiled_block = eqx.filter_jit(block)
+    compiled_fresh_block = eqx.filter_jit(fresh_block)
     compiled_target = eqx.filter_jit(target)
     compiled_metrics = eqx.filter_jit(feedback_metrics)
     compiled_density = eqx.filter_jit(lambda teacher, paths: density_fn(teacher, paths, config))
@@ -433,25 +525,27 @@ def run(args):
 
     compiled_execute = eqx.filter_jit(execute_adapter)
 
-    def attributed_round(datasets, key, target_states):
+    def attributed_round(datasets, key, target_states, pricing=None):
         """Run one reset DPG inner calculation on grouped datasets and RNG key."""
         return dpg_attributions(initial_student, datasets,
-                                lambda s, d, w: block(s, d, w, key),
-                                lambda s: target(s, target_states),
+                                lambda s, d, w: block(s, d, w, key, pricing),
+                                lambda s: target(s, target_states, pricing),
                                 (args.items,), cross_group_batching=True)
 
-    def branched_round(student, datasets, keys, target_states):
+    def branched_round(student, datasets, keys, target_states, pricing=None):
         """Train all SOAR repeats from one baseline on common per-round feedback."""
         return soar_branches(student, datasets, keys,
-                             lambda s, d, k: block(s, d, jnp.ones((args.items,)), k),
-                             lambda s: target(s, target_states))
+                             lambda s, d, k: block(s, d, jnp.ones((args.items,)), k, pricing),
+                             lambda s: target(s, target_states, pricing))
 
-    def aligned_rewards(student, historical, pool):
+    def aligned_rewards(student, historical, pool, pricing=None):
         """Compute full-pool self-play JVP reward with actual optimizer moments."""
         adam = find_adam(student[1])
 
         def values(candidate):
             """Return raw losses for current learner on the full mixed round pool."""
+            if distinct_mode:
+                return loss_fn(eqx.combine(candidate, learner_static), pool, contract, pricing)
             return loss_fn(eqx.combine(candidate, learner_static), pool, contract)
 
         return selfplay_rewards(student[0], historical, adam.nu, adam.count,
@@ -462,14 +556,14 @@ def run(args):
     compiled_branches = eqx.filter_jit(branched_round)
     compiled_alignment = eqx.filter_jit(aligned_rewards)
 
-    def pathwise_round(params, student, noise, key, target_states):
+    def pathwise_round(params, student, noise, key, target_states, pricing=None):
         """Return exact one-block teacher objective and live student/path auxiliaries."""
         teacher = eqx.combine(params, teacher_static)
         return pathwise_meta_learning(
             teacher, student, noise, key,
             lambda model, z: simulator(model, z, config),
-            lambda s, data, k: block(s, data, jnp.ones((data.shape[0],)), k),
-            lambda s: target(s, target_states))
+            lambda s, data, k: block(s, data, jnp.ones((data.shape[0],)), k, pricing),
+            lambda s: target(s, target_states, pricing))
 
     compiled_pathwise_gradient = eqx.filter_jit(
         jax.value_and_grad(pathwise_round, has_aux=True))
@@ -519,21 +613,24 @@ def run(args):
         teacher = eqx.combine(state["teacher"], teacher_static)
         student_before = state["student"]
         metrics = {}
-        if args.method in ("hard-specialist", "easy-specialist"):
+        if args.method in ("hard-specialist", "easy-specialist") or (distinct_mode and args.method == "baseline"):
             batch = args.groups * args.items
-            indices = jax.random.choice(draw_key, feedback_population.shape[0], (batch,), replace=False)
-            chex.assert_shape(indices, (batch,))
-            training_states = feedback_population[indices]
+            if distinct_mode:
+                student, training_states = compiled_fresh_block(student_before, inner_key, market)
+            else:
+                indices = jax.random.choice(draw_key, feedback_population.shape[0], (batch,), replace=False)
+                chex.assert_shape(indices, (batch,))
+                training_states = feedback_population[indices]
+                student = compiled_block(student_before, training_states, jnp.ones((batch,)), inner_key, market)
             chex.assert_shape(training_states, (batch, config.n_steps + 1, config.state_dim))
             pool = SimpleNamespace(states=training_states)
-            student = compiled_block(student_before, training_states, jnp.ones((batch,)), inner_key)
             rewards = behavior = reference = jnp.zeros((batch,))
             mutation_mask = jnp.zeros((batch,), dtype=bool)
             apply_teacher = False
         elif args.method == "pathwise-meta-learning":
             noise = noise_fn(draw_key, args.groups * args.items, config)
             ((objective_value, (student, pool, before_risk)), gradient) = compiled_pathwise_gradient(
-                state["teacher"], student_before, noise, inner_key, feedback_states)
+                state["teacher"], student_before, noise, inner_key, feedback_states, market)
             rewards = jnp.reshape(-objective_value, (1,))
             behavior = pool.log_density
             reference = compiled_density(prior, pool)
@@ -551,11 +648,11 @@ def run(args):
                 teacher, prior, state["bank"], draw_key, config,
                 args.groups * args.items, round_index, host_seed=args.seed,
                 execute_fn=compiled_execute, noise_fn=noise_fn)
-            rewards = compiled_alignment(student_before, old_params, pool)
+            rewards = compiled_alignment(student_before, old_params, pool, market)
             mutation_mask = jnp.array([source == "mutation" for source in sources])
             chex.assert_shape(mutation_mask, (args.groups * args.items,))
 
-            student = compiled_block(student_before, pool.states, jnp.ones_like(rewards), inner_key)
+            student = compiled_block(student_before, pool.states, jnp.ones_like(rewards), inner_key, market)
             state["bank"].age()
             for index, program in enumerate(programs):
                 state["bank"].add(program, float(jax.device_get(rewards[index])),
@@ -570,14 +667,14 @@ def run(args):
             chex.assert_shape(datasets, (args.groups, args.items, config.n_steps + 1, config.state_dim))
             if args.method in ("baseline", "fitted-sde"):
                 student = compiled_block(student_before, pool.states,
-                                         jnp.ones((batch,)), inner_key)
+                                         jnp.ones((batch,)), inner_key, market)
                 rewards = jnp.zeros((batch,))
             elif args.method == "dpg":
-                student, rewards, risk = compiled_attributions(datasets, inner_key, feedback_states)
+                student, rewards, risk = compiled_attributions(datasets, inner_key, feedback_states, market)
                 metrics["target_after"] = risk
             else:
                 repeat_keys = jax.random.split(inner_key, args.groups * 4).reshape((args.groups, 4))
-                branches, rewards = compiled_branches(student_before, datasets, repeat_keys, feedback_states)
+                branches, rewards = compiled_branches(student_before, datasets, repeat_keys, feedback_states, market)
                 state["soar_reward_window"] = (
                     state["soar_reward_window"] + [jnp.mean(rewards)])[-3:]
                 smoothed_reward = jnp.mean(jnp.stack(state["soar_reward_window"]))
@@ -609,18 +706,19 @@ def run(args):
             candidate_teacher = optax.apply_updates(state["teacher"], teacher_updates)
         # Fail before checkpoint commit. No hidden replacement of nonfinite
         # losses/rewards; the previous atomic checkpoint remains recoverable.
-        target_risk = compiled_target(student, feedback_states)
-        measured_feedback = compiled_metrics(student, feedback_states)
+        target_risk = compiled_target(student, feedback_states, market)
+        measured_feedback = compiled_metrics(student, feedback_states, market)
         measured_validation = {}
         measured_regimes = {}
         elapsed = resumed_seconds + time.monotonic() - began
         if ((round_index + 1) % args.validation_every == 0
                 or round_index + 1 >= args.rounds or elapsed >= args.seconds):
             if args.target_regime in ("easy", "hard"):
-                for regime, offset in (("hard", 102), ("easy", 104)):
+                for regime, offset in ((("hard", 102), ("easy", 104), ("base", 106)) if distinct_mode
+                                       else (("hard", 102), ("easy", 104))):
                     evaluation_key = jax.random.fold_in(jax.random.key(args.seed + offset), round_index)
-                    fresh_validation = compiled_regime(evaluation_key, args.validation_size, regime)
-                    regime_metrics = compiled_metrics(student, fresh_validation)
+                    fresh_validation = compiled_regime(evaluation_key, args.validation_size, regime, market)
+                    regime_metrics = compiled_metrics(student, fresh_validation, market, regime)
                     measured_regimes |= {f"evaluation_{regime}_" + name: value
                                          for name, value in regime_metrics.items()}
                     state[f"last_{regime}_validation_key_data"] = jax.random.key_data(evaluation_key)
@@ -628,7 +726,7 @@ def run(args):
                         state["last_validation_key_data"] = jax.random.key_data(evaluation_key)
                         measured_validation = regime_metrics
             else:
-                measured_validation = compiled_metrics(student, validation_states)
+                measured_validation = compiled_metrics(student, validation_states, market)
         for value in jax.tree.leaves((student, candidate_teacher, new_teacher_optimizer, objective_value,
                                      teacher_metrics, gradient, rewards, behavior, reference, pool.states,
                                      target_risk, measured_feedback, measured_validation, measured_regimes)):
@@ -662,9 +760,14 @@ def main():
     """Parse one-seed GPU job configuration and run the selected teacher method."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning", "fitted-sde", "hard-specialist", "easy-specialist"), required=True)
+    parser.add_argument("--market", choices=("distinct", "neural-demo"), default="distinct")
+    parser.add_argument("--option-cost", type=float, default=.0003)
+    parser.add_argument("--option-quote-paths", type=int, default=4096)
+    parser.add_argument("--option-daily-paths", type=int, default=64)
+    parser.add_argument("--credit-fast-grid-size", type=int)
     parser.add_argument("--problem", choices=("options", "credit"), default="options")
     parser.add_argument("--cds-days", type=int, default=126)
-    parser.add_argument("--credit-grid-size", type=int, default=601)
+    parser.add_argument("--credit-grid-size", type=int, help="Explicit slow-grid smoke override; production grids by default")
     parser.add_argument("--credit-simulation", choices=("continuous", "grid"), default="continuous")
     parser.add_argument("--output", required=True)
     parser.add_argument("--seconds", type=float, required=True)

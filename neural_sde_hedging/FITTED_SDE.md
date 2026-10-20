@@ -1,5 +1,7 @@
 # Hard-regime fitted SDE baseline
 
+Fitting remains paused and price-only inference is pending. This retained full-state experiment is rejected by `--market distinct`; it requires explicit `--market neural-demo`.
+
 `--method fitted-sde` fits the same neural SDE architecture used by the adaptive
 methods to **hard-regime training paths**, freezes it, and trains the common
 hedger on fresh simulated paths. It supports options and continuous credit;
@@ -39,7 +41,7 @@ Example on an already provisioned GPU:
 
 ```bash
 python -m neural_sde_hedging.training \
-  --method fitted-sde --target-regime external --problem options --output runs/options-fitted \
+  --method fitted-sde --market neural-demo --target-regime external --problem options --output runs/options-fitted \
   --hard-paths data/hard-train.npz --validation-paths data/hard-validation.npz \
   --fit-steps 1000 --fit-batch-size 32 --teacher-lr 0.001 \
   --seconds 3600 --rounds 1000

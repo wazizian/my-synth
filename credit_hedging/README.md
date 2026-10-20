@@ -201,3 +201,7 @@ continuous proposal model with conditional default integration. Baseline, DPG,
 SOAR, self-play and pathwise meta-learning are connected. The original
 OU `market.py` generator remains available as a separately labelled reference.
 Only static checks have been performed on the new adapter.
+
+The default unified runner now restores the calibrated two-factor distinct benchmark
+with `--market distinct --problem credit`. See [CREDIT.md](../neural_sde_hedging/CREDIT.md).
+The one-factor continuous adapter remains an explicitly selected experiment.

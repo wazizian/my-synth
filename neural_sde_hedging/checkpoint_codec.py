@@ -19,7 +19,11 @@ def teacher_layout(specification):
     every numerical value is replaced with the saved snapshot before use.
     """
     n_latent, width, depth = specification
-    if n_latent == "credit-continuous":
+    if n_latent == "credit-benchmark":
+        from .credit_benchmark import CreditGridConfig, NeuralCredit
+        from credit_hedging.curve_market import CurveConfig
+        template = NeuralCredit(jax.random.key(0), CreditGridConfig(CurveConfig()), width, depth)
+    elif n_latent == "credit-continuous":
         from .credit_continuous import CreditSDEConfig, NeuralCredit
         template = NeuralCredit(jax.random.key(0), CreditSDEConfig(), width, depth)
     elif n_latent == "credit":
@@ -47,6 +51,15 @@ class CheckpointPickler(pickle.Pickler):
 
     def reducer_override(self, value):
         """Reduce a NeuralSDE to a versioned architecture and host arrays; defer others."""
+        if (type(value).__module__ == "neural_sde_hedging.credit_benchmark"
+                and type(value).__name__ == "NeuralCredit"):
+            network = value.network
+            if network.activation is None and network.final_activation is None:
+                return NotImplemented
+            specification = ("credit-benchmark", network.width_size, network.depth)
+            params = eqx.filter(value, eqx.is_inexact_array)
+            arrays = [np.asarray(jax.device_get(leaf)) for leaf in jax.tree.leaves(params)]
+            return restore_saved_teacher, (specification, arrays)
         if (type(value).__module__ == "neural_sde_hedging.credit_continuous"
                 and type(value).__name__ == "NeuralCredit"):
             networks = (value.q_drift, value.diffusion_network, value.risk_price)

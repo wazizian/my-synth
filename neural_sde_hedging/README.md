@@ -1,214 +1,102 @@
-# Neural-SDE teacher for deep hedging
+# Deep hedging with distinct benchmark markets
 
-**Neural teacher paused:** neural-SDE fitting, hyperparameter studies, readouts, and
-campaign launches are disabled by default; neural teacher training also requires opt-in.
-The non-neural `hard-specialist` and `easy-specialist` arms are available. Source is retained for future work.
-Explicitly setting `NEURAL_SDE_ENABLED=1` re-enables these entry points; this does
-not authorize a GPU rental. Cleanup/export/watchdog operations remain available.
-The price-only fitting change is pending: the retained fitted-SDE implementation
-still uses full simulator states. No new numerical validation has been run.
+The default runner is `--market distinct`. Its economic markets and hedgers
+restore the 2026-10-18 distinct-regime experiment. The short-lived day-35
+plotting-diagnostic adapter is no longer the default.
 
+## Fixed market laws
 
-This is the editable implementation. `../remote-code/` is a separately hashed,
-snapshot of historical Hetzner code. Current training uses this package; old campaigns are evidence only.
+Options have three separate regimes:
 
-## Easy and hard benchmarks restored
+| Regime | Physical factor half-lives (days) | Q half-lives (days) | Daily jump probability |
+|---|---|---|---|
+| Easy | (3,3) | (3,3) | 0 |
+| Base | (3,3) | (40,40) | 1/63 |
+| Hard | (40,3) | (1,40) | 1/63 |
 
-The default downstream target is the fixed persistent-shock **hard regime**,
-with 1,024 static training paths and 128 resampled feedback paths per iteration.
-Evaluation simulates 2,048 fresh paths from each of easy and hard at each evaluation point. DPG and
-SOAR optimize against the hard subset; `hard-specialist` trains directly on
-that same static hard pool with the same learner architecture and initialization.
-`easy-specialist` trains on a separate static easy pool using the original
-no-shock options dynamics. It uses the same learner settings and automatically
-selects easy as its training regime. Both specialists are evaluated on both regimes.
-See [HARD_REGIME.md](HARD_REGIME.md) for exact laws, limitations and commands.
-This supersedes older descriptions below of fresh neural-prior feedback and
-fixed validation. The price-only fitted-SDE change remains pending.
+All have factor noise .35, baseline variance .04, variance capped at 1, and
+simultaneous log(2) jumps to both factors at the **end** of an interval. Stock
+returns use current factors before that interval's jump. There is no imposed
+shock date. Q pricing includes future random jumps. Rolling ATM IV and European
+call pricing are available in `option_benchmark.py`.
 
-## Dynamics and observations
+Credit restores the two-factor finite-grid model, original per-regime calibrated
+production grids and original grid-consistent ZCB/CDS prices. A long five-year
+ZCB is hedged using daily new six-month CDS and sales of existing vintages.
+See [CREDIT.md](CREDIT.md) and the versioned production configs in
+`credit_hedging/configs/distinct_regimes.json`.
 
-The teacher learns a **continuous distribution of full paths** using a neural SDE. The joint state is log spot and stochastic
-latent factors. Neural networks parameterize latent drift, joint diffusion, and
-the P/Q market price of risk. All latent factors themselves evolve as SDEs.
-Diffusion is nonsingular with explicit bounds; drift coefficients are bounded.
-See [DYNAMICS.md](DYNAMICS.md) for the equations and discrete P/Q conventions.
+## Training and evaluation
 
-The shared GRU hedger receives log prices, returns, time, and its own previous
-holding. No latent state, volatility estimate, scenario label, or teacher identity
-is supplied. Every arm for a given problem starts from the same architecture and initialization.
+- `baseline` trains on **fresh base-regime** paths each round (ordinary for credit).
+- `easy-specialist` and `hard-specialist` train on **fresh own-regime** paths.
+- DPG/SOAR keep a static 1,024-path hard feedback pool and uniformly resample
+  128 paths per iteration, shared across their within-round comparisons. Their
+  synthetic learner data comes from their teacher, not from this feedback pool.
+- Scheduled evaluation draws **2,048 fresh paths from each of easy/base/hard**.
+  Evaluation randomness is independent of learner training and the static pool;
+  matching rounds use common draws across arms. No evaluation data enters rewards.
+- Every arm within a problem uses the same architecture and initialization, with
+  one initialization seed. Learner updates use the historical clip-1/Adam form.
+  Current batch sizes, learning rates, budgets and inner step counts are CLI
+  settings, not a reproduction of the old LR-selection campaign.
 
-The runner supports both `--problem options` (an option hedge with a dollar
-holding cap) and `--problem credit` (a five-year long ZCB hedged using daily
-new six-month CDS and partial sales of existing vintages). The credit adapter
-defaults to a continuous neural hazard SDE with trainable drift, diffusion and
-risk-price networks, a fixed neural pricing reference, and exact conditional
-default-date integration. All five methods support continuous credit. See
-[CREDIT.md](CREDIT.md) for equations, conventions and restrictions. Each problem
-uses one common GRU architecture/initialization across its training methods;
-credit requires vintage inputs and outputs absent from the option hedger.
+The options learner is the original GRU32 with zero output head, holdings in
+**[0,1] shares**, and features current log price, previous log price, remaining
+time and previous shares. It hedges an ordinary uncapped ATM call. The credit
+learner is the original float64 target/retention GRU32 initialized to unit
+replenishment and full retention. No latent state or regime ID reaches a policy.
 
-## Method implementation map
+Teacher algorithms remain DPG/GRPO, SOAR/dataset-RLOO and self-play with
+replay/alignment. The option teacher remains a neural-SDE synthetic proposal.
+The restored credit teacher is a neural physical-transition proposal on the
+**hard two-factor grid**, initialized to the true hard transition law; its
+likelihood includes both factor cell probabilities and daily default/survival.
+It does not change the contractual Q price tables. There is no categorical
+mixture generator. Credit grid/default draws are discrete: pathwise meta-learning
+is explicitly rejected for this benchmark. The fitted-SDE variant is also
+rejected here pending the requested price-only fitting work.
 
-Primary PDFs and a review of the *previous* code are in [papers](../papers/README.md).
-The following mechanisms are implemented here:
+## Metrics and pricing
 
-| Method | Paper mechanisms | Files |
-|---|---|---|
-| DPG | Fixed inner initialization and optimizer reset; differentiation through all weighted inner updates, actual Adam moments and clipping; cross-group batching; candidate-group relative advantages and clipped GRPO surrogate | `methods.py`, `training.py` |
-| SOAR | Multiple candidate datasets; four randomized training repeats per dataset, all from one baseline; shared fresh per-round feedback; repeat averaging; dataset leave-one-out teacher rewards; smoothed promotion threshold, best dataset and median repeat; retained promotion datasets | `methods.py`, `training.py` |
-| Self-play | Halfway historical checkpoint; actual bias-corrected Adam preconditioner; absolute JVP alignment; fresh/mutation/replay; new Brownian executions of stored programs; stored proposal snapshots and recomputed behavior likelihoods; detached exp(±20)-clipped importance ratios; mutation exclusion from PG; whole-pool standardized rewards, prior penalty in stopped advantage, positive-reward expert iteration | `methods.py`, `replay.py`, `training.py` |
-| Pathwise meta-learning | Direct gradients through reparameterized neural-SDE paths and persistent student optimizer updates to target risk; truncated at outer-round boundaries | `methods.py`, `training.py`, [details](PATHWISE_META_LEARNING.md) |
-| Archive | Uniform earlier non-replay program sampling without replacement; parents sampled uniformly over occupied niches; eight positive-reward elites per niche; .97 reward decay per round | `replay.py` |
-| Recovery | Atomic fsynced checkpoints; learner/teacher optimizers, random keys, branch promotion state, program bank and budget; per-round learner history; configuration/source/feedback hashes; duplicate-run lock; free-space reserve | `training.py` |
+Report terminal entropic risk, fractional CVaR95 and population terminal SD.
+Credit daily error SD comes from the exact daily marked ledger. Options daily
+marked error uses Q mark increments minus stock gains plus trading costs,
+including final liquidation. It is computed only at scheduled evaluation,
+using a declared subset (default 64) and Monte Carlo Q paths (default 4,096).
+Quote standard-error diagnostics and telescoping error are logged; quote noise
+can affect daily SD. Initial option Q premiums are fixed across arms and rounds
+within each regime, with their Monte Carlo standard errors recorded.
 
-## Explicit adaptations
+Entropic ESS/max-weight diagnostics remain. Neither a restored regime label nor
+finite static checks demonstrate the desired economic difficulty or specialist
+performance gap. The original unbounded payoff/share setup also has no guarantee
+of finite population exponential moments; finite-sample risk is not such a proof.
 
-These papers train language models, not hedgers. This implementation does **not**
-claim to reproduce their text-generation benchmarks or convergence theorems.
+## Running
 
-* Entropic risk replaces additive token loss. Weighted risk includes its weight
-  denominator. Self-play weights raw loss JVPs by detached `B*softmax(gamma*loss)`;
-  it does not differentiate these weights a second time.
-* Whole **Euler factor-path densities** replace sequence probabilities. Initial
-  states are fixed and conditional, with no learned initial-state distribution.
-  Every generated factor/spot transition and diffusion log determinant is included. Brownian
-  innovation density alone is not used as a changing-teacher score.
-* A reusable program is a frozen neural SDE. Its fresh execution is scored under
-  its actual producing snapshot, the current teacher, and the frozen prior. The
-  objective is over paths, not a claimed probability density over neural weights.
-  Importance correction is componentwise; finite-bank selection and clipped
-  ratios introduce the same kinds of off-policy approximation that must be
-  assessed empirically. Mutation perturbs an archived SDE's parameters; this
-  remains within the coefficient parameterization's bounds. Mutation rows are
-  excluded from PG even though their conditional path density is available.
-* Quality-diversity niches are 9 squared-return persistence bins × 4 realized
-  volatility bins, replacing program depth/length. Admission rewards are
-  recalculated on fresh paths and the current learner; old scores only rank
-  mutation parents. Default pool fractions are 50% fresh, 25% mutation and 25%
-  replay, with fresh fallback while banks are empty.
-* SOAR's four repeats use bootstrap inner-training minibatches from one dataset;
-  they share one initialization. This is algorithmic variance reduction, not a
-  four-seed reported experiment. Accuracy-based promotion becomes risk reduction
-  with an explicitly configured threshold. The runner uses the paper's most
-  recent three round-average rewards for promotion smoothing. The pure
-  promotion primitive also exposes EMA smoothing for separately named variants.
-* The included DPG runner uses cross-group batching and one on-policy teacher
-  update per round. The GRPO clipping machinery is present; at the first update
-  its ratio is one, so clipping does not constrain that initial gradient.
-  The primitive also supports separate group attribution.
-* Learner and teacher gradients are clipped at norm one. This extra engineering
-  choice does not bound Adam parameter displacement or guarantee improvement.
-  Both use AdamW with explicitly recorded weight decay (default .01). The
-  learner uses a linear warmup then constant learning rate (default 32 updates);
-  the self-play preconditioner uses its actual current scheduled rate and
-  second moments. These numerical values are financial-adapter settings, not
-  claimed copies of the papers' language-model hyperparameters.
-
-## Feedback and financial interpretation
-
-The adaptive arms generate synthetic learner data through the problem's neural
-SDE (`NeuralSDE` for options, `NeuralCredit` for credit). The fixed-prior control
-samples the initial neural model. The specialists instead train directly on
-fixed paths from their respective easy or hard regimes. The target law is separate from the generator.
-
-By default, generate **1,024 fixed hard training paths**, then sample **128**
-without replacement per round. DPG, SOAR and pathwise meta-learning share that
-subset across all within-round downstream comparisons. Self-play's alignment
-reward remains defined on its generated round pool. Feedback subset randomness
-is checkpointed; the fixed hard pool is regenerated deterministically on resume.
-
-Each evaluation uses **2,048 freshly simulated paths per regime**, easy and
-hard, from separate RNG namespaces. Evaluate every **16 rounds**, at the last requested round, and when a
-completed round exhausts the soft time budget. Matching rounds use common draws
-across methods. Evaluation never enters teacher rewards. A separate final test
-protocol remains required for scientific comparisons.
-
-An optional `--feedback-paths training.npz` replaces the static hard training pool.
-For fixed external training/validation data, explicitly select
-`--target-regime external` and supply both `--feedback-paths` and
-`--validation-paths`. Files contain `states[B,T+1,D]`, with D=3 for options and
-D=1 for continuous credit. Independent provenance is the caller's responsibility.
-`--target-regime prior` explicitly selects the old neural-prior demonstration.
-
-Entropic estimates on finite batches are downward biased and may miss rare
-losses. Every feedback/validation evaluation logs ESS, ESS/batch size, maximum
-exponential weight, sample size and an `entropic_tail_underresolved` flag. The
-flag threshold is configurable with `--entropic-ess-fraction` (default 0.1).
-It is a concentration diagnostic, not proof that unseen tails are covered.
-Increase `--feedback-size` when feedback is underresolved; check stability on
-larger independent validation samples. No automatic batch-size adaptation or
-bias correction is claimed. These starting sizes have not been GPU-validated.
-
-The premium is fixed by `--premium` for every path and teacher. The simulator's
-Q dynamics are available but no implied-volatility surface or Q-priced mark
-is fed to this hedger. Its default zero premium is an accounting offset, not an
-arbitrage-free price estimate. Changing that constant does not change entropic
-hedger gradients. A study of IV/RV transfer still needs an independently frozen,
-coherently priced evaluation design.
-
-Training logs include feedback empirical entropic risk, fractional CVaR95,
-population terminal standard deviation and mean loss in underlying currency
-units. `metrics.py` can also consume actual daily marked hedging errors. The
-option adapter does not produce Q-marked daily errors yet; it never labels returns
-or unmarked P&L as that metric. The credit adapter reports actual daily discounted
-marked hedging errors from its bond/CDS ledger. The old source and reports retain their existing
-daily marked evaluation implementations.
-
-The ordinary-call default remains available (`payoff_cap=None`). Its lognormal
-tails can make population entropic risk infinite. Coefficient bounds, replay,
-gradient clipping and finite empirical risk do not repair that. An explicitly
-selected `--payoff-cap 1` experiment instead bounds the liability; with long-only
-dollar holdings and costs below one, losses have an explicit finite upper bound.
-This changes the contract and must be reported as such; it is not silently
-substituted for the ordinary call.
-
-## Verification and GPU execution
-
-Ruff and `py_compile` pass. On 2026-10-19, all eleven opt-in GPU verification
-cases passed on an RTX 4090. Two-round, 126-day smoke runs of DPG, SOAR and
-self-play also passed, including separate-process loading of CLI checkpoints.
-The tests exposed and verified a fix for replay-bank serialization. See
-[smoke evidence](../gpu-smoke-20261019/README.md) for source hashes and logs.
-See [GPU_VALIDATION.md](GPU_VALIDATION.md) for the required numerical acceptance
-checks, including broader scientific checks not yet performed. No additional GPU rental is implied
-by these commands. Do not run them on this workspace or Hetzner's one-vCPU host.
-
-On an already authorized GPU worker, dependencies are the repository's JAX,
-Equinox, Optax, Chex and NumPy dependencies, plus pytest for verification:
+Baseline and specialists do not require the neural-teacher opt-in:
 
 ```bash
-NEURAL_SDE_GPU_TESTS=1 python -m pytest -q tests/test_neural_sde_gpu.py
+python -m neural_sde_hedging.training --market distinct --problem options \
+  --method baseline --output runs/options-base --seconds 3600
+python -m neural_sde_hedging.training --market distinct --problem options \
+  --method easy-specialist --output runs/options-easy --seconds 3600
+python -m neural_sde_hedging.training --market distinct --problem credit \
+  --method hard-specialist --output runs/credit-hard --seconds 3600
 ```
 
-A bounded-contract integration example, **GPU worker only**, is:
+Only run these on an already provisioned GPU under an authorized budget.
+Neural-teacher methods remain paused unless explicitly enabled with
+`NEURAL_SDE_ENABLED=1`. No new rental or numerical job has been started.
+Checkpoints preserve learner/teacher/optimizer/RNG and source/config fingerprints.
+Production hard-credit pricing alone requires roughly 10 GB of GPU memory for
+its bond table; `--credit-grid-size` and `--credit-fast-grid-size` are explicit
+smoke approximations, not the calibrated production discretization.
 
-```bash
-python -m neural_sde_hedging.training \
-  --method selfplay --output /worker/results/neural-selfplay \
-  --seconds 600 --rounds 100 --payoff-cap 1
-```
-
-Use `--method dpg` or `--method soar` for the other implementations. Launch
-through a durable supervisor, for example `systemd-run --user` with a unique
-unit, `WorkingDirectory`, bounded `RuntimeMaxSec`, `KillMode=control-group`, and
-persistent bounded logs. Set the hard deadline above the soft inner budget to
-allow final export. Store provider instance ID, unit name, source hashes, budget,
-output/history locations and recovery procedure before launch. The budget check
-is between rounds; an external supervisor must enforce a hard deadline during
-compilation or a long inner block. Keep `latest.pkl` and `learner-history/`
-together. Resume with the exact same command/source; never reset history or
-silently prune bank entries. Export and verify artifacts before worker shutdown.
-# Four-H100 pilot
-
-For a detached baseline/DPG/SOAR/self-play allocation with GPU calibration,
-artifact exports, spending envelope and provider cleanup, see
-[FOUR_GPU.md](FOUR_GPU.md) and the `neural_sde_hedging.four_gpu` launcher.
-
-
-Additional baseline: `fitted-sde` fits the neural SDE to full-state hard-regime
-training paths using the Gaussian likelihood at every daily transition, then
-freezes it and trains the same hedger on fresh simulations. It supports options
-and continuous credit; independent validation is required. See [FITTED_SDE.md](FITTED_SDE.md).
-Fitting is privileged full-state inference, not price-only latent inference.
-The existing four-arm launcher is unchanged; GPU checks remain unrun.
+`--market neural-demo` retains the earlier experimental adapters; see
+[NEURAL_DEMO.md](NEURAL_DEMO.md). It is not the distinct-regime experiment.
+The four-GPU launcher uses the restored default for its original four arms;
+specialists remain separate jobs. Only Ruff and py_compile have been run on
+these changes. New numerical equivalence tests against archived source are
+GPU-only and remain unrun.

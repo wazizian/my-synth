@@ -1,34 +1,38 @@
-# Current plan: hard targets and easy/hard specialists
+# Current plan: restore the distinct-regime experiment
 
-Updated 2026-10-20. The target regime is separate from the adaptive generator.
+Updated 2026-10-20. The default economic adapter is `--market distinct`.
 
-1. Restore the options persistent-shock hard physical law from the volatility
-   diagnostic: factor half-lives (40,3) days, noise .35, log(2) shock to both
-   factors at day 35. Continuous credit uses a new one-factor persistent-hazard
-   analogue, not the old two-factor credit benchmark. Verify economic hardness
-   before making claims about specialist gaps.
-2. Generate 1,024 hard training paths once. Each DPG/SOAR iteration samples 128
-   without replacement and shares that batch across its downstream comparisons.
-   Their synthetic learner data still comes from the teacher. Do not replace
-   the hard objective by risk on the initial neural prior.
-3. Evaluate on 2,048 freshly simulated paths from each of easy and hard every
-   16 rounds and at the last completed round. Use independent RNG from the static training pool and
-   teacher, common evaluation draws across methods at matching rounds.
-4. Include `hard-specialist` and `easy-specialist`: train the same GRU directly
-   on subsets of their respective fixed pools, with the same initialization,
-   optimizer, inner update count and learner batch size. Easy options restore
-   the no-shock law with (3,3)-day factor half-lives; credit easy is a new
-   no-shock one-factor analogue with a 3-day half-life. One initialization seed; no multiseed study.
-5. Record entropic risk, CVaR95, terminal error SD, credit daily marked-error SD,
-   and entropic ESS/concentration diagnostics. Finite-sample tail bias remains.
-6. Preserve the explicit pause on neural teacher computation. Both non-neural
-   specialists are available without the neural opt-in. Neural teacher methods
-   still require NEURAL_SDE_ENABLED=1. Price-only fitted-SDE work is pending;
-   the preserved full-state fitted baseline is not the requested final method.
-7. Only Ruff and py_compile locally/control-plane. GPU validation and numerical
-   training remain unrun. Do not rent GPUs without an authorized budget. Use
-   detached jobs, checkpoints, export and provider cleanup for authorized runs.
+1. Options: original random Bernoulli arrivals (1/63 daily in base/hard, zero in
+   easy), simultaneous log(2) factor jumps at interval end, variance cap 1.
+   Restore original P/Q half-lives, Q pricing including future jumps, and IV.
+   No deterministic day-35 training event.
+2. Credit: original calibrated two-factor finite-grid production settings,
+   coherent grid/default simulation and per-regime ZCB/CDS tables, original
+   five-year bond / rolling six-month CDS ledger. No one-factor substitution.
+3. Restore original policies: GRU32, zero output heads, price-history/share-based
+   [0,1] actions for options; float64 target-retention/replenishment for credit.
+   Same architecture and initialization within each problem. One initialization
+   seed; no multiseed. Learners use clip-1/Adam; learning rates/batches/budgets
+   remain explicit CLI settings, not copied LR-selection outcomes.
+4. Baseline trains on fresh base/ordinary episodes. Specialists train on fresh
+   own-domain episodes. DPG/SOAR optimize feedback on a fixed 1,024-path hard
+   training pool, resampling 128 each iteration. Synthetic learner data comes
+   from the teacher; hard is not replaced by the initial neural prior.
+5. Keep the requested fresh evaluation: 2,048 fresh easy/base/hard episodes per
+   scheduled evaluation, separate RNG, common draws across arms at matching
+   rounds. Preserve independent final scientific testing and selection rules.
+6. Report entropic, fractional CVaR95, terminal SD and actual daily marked-error
+   SD. Option daily Q marks run only at scheduled evaluations, on declared
+   subsets/Q draws, with MC quote-error diagnostics. Keep ESS/concentration flags.
+7. Neural teacher runs remain paused by default; baseline/specialists are
+   available. Credit pathwise training is rejected for the discrete grid.
+   Price-only fitted-SDE work remains pending; no full-state fitting baseline
+   is presented as its replacement.
+8. Static checks only locally/control-plane. Numerical archived-code equivalence,
+   grid/default score, accounting, integration and resume tests need an authorized
+   GPU. No rental/jobs launched. The restored hard-credit bond table is ~10 GB;
+   calibrate resources before a campaign and use durable detached jobs, budgets,
+   checkpoint export and verified provider cleanup.
 
-See [HARD_REGIME.md](neural_sde_hedging/HARD_REGIME.md) for implementation,
-scientific caveats and the specialist command. The four-GPU launcher still has
-its original four arms; run the specialists as separate jobs.
+The earlier continuous credit / dollar-bounded option experiments remain only
+under explicit `--market neural-demo`. They are separate scientific settings.

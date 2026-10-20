@@ -153,7 +153,8 @@ def training_jobs(config, phase):
     for method, gpu in zip(METHODS, config["gpus"], strict=True):
         profile = config.get("hyperparameters", {}).get(method, {})
         argv = [config["python"], "-m", "neural_sde_hedging.training",
-                "--method", method, "--target-regime", config.get("target_regime", "hard"),
+                "--method", method, "--market", config.get("market", "distinct"),
+                "--target-regime", config.get("target_regime", "hard"),
                 "--problem", config["problem"],
                 "--credit-simulation", config["credit_simulation"], "--output", str(root / phase / method),
                 "--seconds", str(seconds), "--rounds",
@@ -163,8 +164,10 @@ def training_jobs(config, phase):
                 "--student-lr", str(profile.get("student_lr", .0003)),
                 "--teacher-lr", str(profile.get("teacher_lr", .001)),
                 "--warmup-steps", str(profile.get("warmup_steps", 32)), "--weight-decay", "0.01",
-                "--feedback-size", "128", "--payoff-cap", "1",
+                "--feedback-size", "128",
                 "--min-free-gb", str(config["min_free_gb"])]
+        if config.get("market", "distinct") == "neural-demo":
+            argv += ["--payoff-cap", "1"]
         if config["feedback_paths"]:
             argv += ["--feedback-paths", config["feedback_paths"]]
             if config["validation_paths"]:
@@ -209,7 +212,7 @@ def supervise(config):
                 raise RuntimeError("Initial artifact export failed")
             # Tests opt in explicitly and run on a GPU, never on the control host.
             test_argv = [config["python"], "-m", "pytest", "-q",
-                         "tests/test_neural_sde_gpu.py", "--junitxml=" + str(root / "pytest.xml")]
+                         "tests/test_neural_sde_gpu.py", "tests/test_distinct_benchmark_gpu.py", "--junitxml=" + str(root / "pytest.xml")]
             os.environ["NEURAL_SDE_GPU_TESTS"] = "1"
             if not (root / "gpu-tests-passed.json").exists():
                 run_jobs(config, [("gpu-tests", config["gpus"][0], test_argv)],
@@ -312,6 +315,9 @@ def launch(args):
                     ignore=shutil.ignore_patterns("__pycache__"))
     (code / "tests").mkdir()
     shutil.copy2(source.parent / "tests/test_neural_sde_gpu.py", code / "tests")
+    shutil.copy2(source.parent / "tests/test_distinct_benchmark_gpu.py", code / "tests")
+    shutil.copytree(source.parent / "tests/references", code / "tests/references",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     feedback = None
     validation = None
     if args.target_regime not in ("easy", "hard") and bool(args.feedback_paths) != bool(args.validation_paths):
@@ -366,6 +372,7 @@ def main():
     command.add_argument("--min-free-gb", type=float, default=10.)
     command.add_argument("--max-artifact-gb", type=float, default=10.)
     command.add_argument("--export-interval", type=float, default=60.)
+    command.add_argument("--market", choices=("distinct", "neural-demo"), default="distinct")
     command.add_argument("--target-regime", choices=("easy", "hard", "prior", "external"), default="hard")
     command.add_argument("--feedback-paths")
     command.add_argument("--problem", choices=("options", "credit"), default="options")
