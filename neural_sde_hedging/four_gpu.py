@@ -158,10 +158,11 @@ def training_jobs(config, phase):
                 "--student-lr", str(profile.get("student_lr", .0003)),
                 "--teacher-lr", str(profile.get("teacher_lr", .001)),
                 "--warmup-steps", str(profile.get("warmup_steps", 32)), "--weight-decay", "0.01",
-                "--feedback-size", "512", "--payoff-cap", "1",
+                "--feedback-size", "1024", "--payoff-cap", "1",
                 "--min-free-gb", str(config["min_free_gb"])]
         if config["feedback_paths"]:
-            argv += ["--feedback-paths", config["feedback_paths"]]
+            argv += ["--feedback-paths", config["feedback_paths"],
+                     "--validation-paths", config["validation_paths"]]
         jobs.append((phase + "-" + method, gpu, argv))
     write_json(root / (phase + "-commands.json"), jobs)
     return jobs
@@ -301,6 +302,12 @@ def launch(args):
     (code / "tests").mkdir()
     shutil.copy2(source.parent / "tests/test_neural_sde_gpu.py", code / "tests")
     feedback = None
+    validation = None
+    if bool(args.feedback_paths) != bool(args.validation_paths):
+        raise ValueError("Provide both feedback and validation path files, or neither")
+    if args.validation_paths:
+        validation = root / "validation.npz"
+        shutil.copy2(Path(args.validation_paths).resolve(), validation)
     if args.feedback_paths:
         feedback = root / "feedback.npz"
         shutil.copy2(Path(args.feedback_paths).resolve(), feedback)
@@ -309,6 +316,7 @@ def launch(args):
                            "pilot_seconds": args.pilot_hours * 3600,
                            "hyperparameters": profiles,
                            "feedback_paths": str(feedback) if feedback else None,
+                           "validation_paths": str(validation) if validation else None,
                            "deadline": time.time() + duration,
                            "upper_compute_cost_usd": upper_cost}
     config_path = root / "campaign.json"
@@ -348,6 +356,7 @@ def main():
     command.add_argument("--max-artifact-gb", type=float, default=10.)
     command.add_argument("--export-interval", type=float, default=60.)
     command.add_argument("--feedback-paths")
+    command.add_argument("--validation-paths")
     command.add_argument("--hyperparameter-profile", help="Per-method JSON from hyperparameter validation")
     for mode in ("supervise", "watchdog"):
         command = modes.add_parser(mode)

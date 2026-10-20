@@ -59,8 +59,8 @@ control-plane disk is unsuitable without making room first.
 One seed (`20261017`), identical GRU hedger initialization and architecture,
 126-day horizon, capped-call payoff (`--payoff-cap 1`), entropic gamma 10,
 learner LR 0.0003, teacher LR 0.001, 32-update learner warmup, weight decay 0.01,
-gradient clipping 1, four groups of 32 paths, eight inner updates and 512 fixed
-feedback paths. These are starting settings, not tuned hyperparameters.
+gradient clipping 1, four groups of 32 paths, eight inner updates and 1,024 fresh per-round
+feedback paths, with 2,048 fixed validation paths evaluated every 16 rounds. These are starting settings, not tuned hyperparameters.
 To use a frozen per-method configuration from the GPU validation study, add
 `--hyperparameter-profile /path/selected-configurations.json`. Review its
 independent confirmation results first; development selection alone is not
@@ -69,9 +69,9 @@ identically to calibration and pilot phases.
 Each arm has one visible GPU, selected by UUID; this is independent-job
 parallelism, not distributed training. Method-specific compute differs.
 
-Default feedback is a deterministic independent draw from the initial prior,
+Default feedback consists of fresh per-round draws from the initial neural-SDE prior,
 shared across arms. This is a demonstration target. For an intended scientific
-target, pass `--feedback-paths /path/frozen-feedback.npz`; the file is copied and
+target, pass both `--feedback-paths /path/training.npz` and `--validation-paths /path/validation.npz`; the file is copied and
 hashed, must contain `states[episodes,127,3]`, and must not be the sealed final
 test set. No final test set is opened by this pilot.
 

@@ -9,6 +9,31 @@ import jax
 import jax.numpy as jnp
 
 
+def pathwise_meta_learning(teacher, student, noise, key, simulate_fn,
+                           block_fn, target_fn):
+    """Return downstream risk change and trained student/paths for one unroll.
+
+    Inputs: teacher/student PyTrees, fixed primitive noise and minibatch key,
+    simulate_fn(teacher,noise)->paths, block_fn(student,states,key)->student,
+    target_fn(student)->scalar risk on independent target paths. Outputs are
+    scalar risk change and (trained student, generated paths, baseline risk).
+    The teacher, paths, student updates and optimizer moments remain connected.
+    Random draws and the incoming student are outer-round boundary conditions;
+    callers differentiate this function with respect to the teacher only.
+    """
+    paths = simulate_fn(teacher, noise)
+    batch, n_time, state_dim = paths.states.shape
+    chex.assert_shape(paths.states, (batch, n_time, state_dim))
+    before = target_fn(student)
+    chex.assert_shape(before, ())
+    trained = block_fn(student, paths.states, key)
+    after = target_fn(trained)
+    chex.assert_shape(after, ())
+    change = after - before
+    chex.assert_shape(change, ())
+    return change, (trained, paths, before)
+
+
 def dpg_attributions(initial_student, datasets, block_fn, target_fn,
                      weight_shape, cross_group_batching=True):
     """Attribute grouped synthetic datasets through reset inner learning.

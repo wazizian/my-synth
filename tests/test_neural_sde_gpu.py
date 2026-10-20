@@ -29,7 +29,7 @@ from neural_sde_hedging.dynamics import (NeuralSDE, SDEPaths, path_log_prob,
                                          transition_coefficients,
                                          transition_log_prob)
 from neural_sde_hedging.hedger import Contract, Hedger, terminal_losses
-from neural_sde_hedging.methods import (dpg_attributions, selfplay_objective,
+from neural_sde_hedging.methods import (pathwise_meta_learning, dpg_attributions, selfplay_objective,
                                        selfplay_rewards, soar_branches)
 from neural_sde_hedging.replay import ProgramBank, build_pool
 from neural_sde_hedging.training import atomic_checkpoint, learner_block, load_checkpoint, run
@@ -41,6 +41,45 @@ def small_model():
     config = SDEConfig(n_steps=3, n_latent=2)
     teacher = NeuralSDE(jax.random.key(11), config, width=4, depth=1)
     return config, teacher
+
+
+def test_pathwise_meta_learning_matches_finite_difference(small_model):
+    """Check full SDE-to-Adam-to-target derivative against fixed-noise differences."""
+    config, teacher = small_model
+    params, static = eqx.partition(teacher, eqx.is_inexact_array)
+    learner = Hedger(jax.random.key(81), hidden_size=4)
+    learner_params, learner_static = eqx.partition(learner, eqx.is_inexact_array)
+    optimizer = optax.adam(1e-3, eps_root=1e-8)
+    student = (learner_params, optimizer.init(learner_params))
+    contract = Contract(payoff_cap=1.)
+    noise = sample_noise(jax.random.key(82), 8, config)
+    feedback = simulate(teacher, sample_noise(jax.random.key(83), 8, config), config)
+
+    def target(state):
+        """Return independent mean squared terminal error of student state."""
+        losses = terminal_losses(eqx.combine(state[0], learner_static), feedback, contract)
+        return jnp.mean(losses**2)
+
+    def objective(scale):
+        """Perturb teacher diffusion biases and differentiate a two-step Adam unroll."""
+        candidate = eqx.tree_at(lambda p: p.diffusion_network.layers[-1].bias,
+                                params, params.diffusion_network.layers[-1].bias + scale)
+        value, _ = pathwise_meta_learning(
+            eqx.combine(candidate, static), student, noise, jax.random.key(84),
+            lambda model, z: simulate(model, z, config),
+            lambda s, data, key: learner_block(s, data, jnp.ones((8,)),
+                learner_static, optimizer, contract, 10., 2, key), target)
+        return value
+
+    compiled = jax.jit(jax.value_and_grad(objective))
+    value, derivative = compiled(jnp.array(0.))
+    epsilon = 2e-3
+    plus, _ = compiled(jnp.array(epsilon))
+    minus, _ = compiled(jnp.array(-epsilon))
+    difference = (plus - minus) / (2 * epsilon)
+    assert np.isfinite(float(value)) and np.isfinite(float(derivative))
+    assert abs(float(derivative)) > 1e-9
+    np.testing.assert_allclose(derivative, difference, rtol=.15, atol=2e-7)
 
 
 def test_joint_shapes_score_and_diffusion_gradient(small_model):
@@ -232,7 +271,7 @@ def test_selfplay_historical_alignment_and_mutation_exclusion():
     np.testing.assert_array_equal(jax.grad(objective)(logp), [0., 0.])
 
 
-@pytest.mark.parametrize("method", ("baseline", "dpg", "soar", "selfplay"))
+@pytest.mark.parametrize("method", ("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning"))
 def test_complete_training_and_resume(tmp_path, method):
     """Run two tiny real GPU rounds per method and verify exact no-reset resume."""
     args = SimpleNamespace(method=method, output=str(tmp_path / method), seconds=600.,
@@ -240,7 +279,8 @@ def test_complete_training_and_resume(tmp_path, method):
                            n_steps=3, gamma=10., student_lr=3e-4, teacher_lr=1e-3,
                            warmup_steps=2, weight_decay=.01,
                            promotion_threshold=1e-4, feedback_paths=None,
-                           feedback_size=4, payoff_cap=.5, premium=0., min_free_gb=.01)
+                           feedback_size=4, validation_size=8, validation_every=2,
+                           validation_paths=None, entropic_ess_fraction=.1, payoff_cap=.5, premium=0., min_free_gb=.01)
     run(args)
     directory = tmp_path / method
     with (directory / "status.json").open() as stream:
@@ -248,6 +288,17 @@ def test_complete_training_and_resume(tmp_path, method):
     assert status["status"] == "complete"
     before = load_checkpoint(directory / "latest.pkl")
     assert before["round_index"] == 2
+    rows = [json.loads(line) for line in (directory / "progress.jsonl").read_text().splitlines()]
+    assert "validation_entropic" not in rows[0]
+    assert "validation_entropic" in rows[1]
+    assert rows[0]["feedback_sample_size"] == 4
+    assert rows[1]["validation_sample_size"] == 8
+    assert 0 < rows[0]["feedback_entropic_ess_fraction"] <= 1.00001
+    assert 0 < rows[0]["feedback_entropic_max_weight"] <= 1
+    expected_key = jax.random.key(args.seed + 2)
+    for _ in range(2):
+        expected_key = jax.random.split(expected_key, 4)[0]
+    np.testing.assert_array_equal(before["key_data"], jax.random.key_data(expected_key))
     assert np.isfinite(before["seconds"])
     if method == "baseline":
         prior = NeuralSDE(jax.random.key(args.seed + 1), SDEConfig(n_steps=args.n_steps))

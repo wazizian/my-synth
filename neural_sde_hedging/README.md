@@ -1,12 +1,11 @@
 # Neural-SDE teacher for deep hedging
 
 This is the editable implementation. `../remote-code/` is a separately hashed,
-unchanged snapshot of the previous Hetzner code. No campaign has been launched.
+snapshot of historical Hetzner code. Current training uses this package; old campaigns are evidence only.
 
 ## Dynamics and observations
 
-The teacher learns a **continuous distribution of full paths**, rather than
-three easy/base/hard mixture weights. The joint state is log spot and stochastic
+The teacher learns a **continuous distribution of full paths** using a neural SDE. The joint state is log spot and stochastic
 latent factors. Neural networks parameterize latent drift, joint diffusion, and
 the P/Q market price of risk. All latent factors themselves evolve as SDEs.
 Diffusion is nonsingular with explicit bounds; drift coefficients are bounded.
@@ -30,8 +29,9 @@ The following mechanisms are implemented here:
 | Method | Paper mechanisms | Files |
 |---|---|---|
 | DPG | Fixed inner initialization and optimizer reset; differentiation through all weighted inner updates, actual Adam moments and clipping; cross-group batching; candidate-group relative advantages and clipped GRPO surrogate | `methods.py`, `training.py` |
-| SOAR | Multiple candidate datasets; four randomized training repeats per dataset, all from one baseline; shared frozen feedback; repeat averaging; dataset leave-one-out teacher rewards; smoothed promotion threshold, best dataset and median repeat; retained promotion datasets | `methods.py`, `training.py` |
+| SOAR | Multiple candidate datasets; four randomized training repeats per dataset, all from one baseline; shared fresh per-round feedback; repeat averaging; dataset leave-one-out teacher rewards; smoothed promotion threshold, best dataset and median repeat; retained promotion datasets | `methods.py`, `training.py` |
 | Self-play | Halfway historical checkpoint; actual bias-corrected Adam preconditioner; absolute JVP alignment; fresh/mutation/replay; new Brownian executions of stored programs; stored proposal snapshots and recomputed behavior likelihoods; detached exp(±20)-clipped importance ratios; mutation exclusion from PG; whole-pool standardized rewards, prior penalty in stopped advantage, positive-reward expert iteration | `methods.py`, `replay.py`, `training.py` |
+| Pathwise meta-learning | Direct gradients through reparameterized neural-SDE paths and persistent student optimizer updates to target risk; truncated at outer-round boundaries | `methods.py`, `training.py`, [details](PATHWISE_META_LEARNING.md) |
 | Archive | Uniform earlier non-replay program sampling without replacement; parents sampled uniformly over occupied niches; eight positive-reward elites per niche; .97 reward decay per round | `replay.py` |
 | Recovery | Atomic fsynced checkpoints; learner/teacher optimizers, random keys, branch promotion state, program bank and budget; per-round learner history; configuration/source/feedback hashes; duplicate-run lock; free-space reserve | `training.py` |
 
@@ -80,11 +80,39 @@ claim to reproduce their text-generation benchmarks or convergence theorems.
 
 ## Feedback and financial interpretation
 
-Use `--feedback-paths frozen-feedback.npz` for independently frozen feedback.
-The file must contain `states[episodes,n_steps+1,1+n_latent]`. This is teacher
-training feedback, **not** a sealed final evaluation set. Without it the runner
-uses an independently seeded, frozen-prior demonstration dataset. That fallback
-is for integration, not a claim to reproduce easy/base/hard transfer results.
+All training arms generate paths through `NeuralSDE`. The fixed-prior control
+uses the initial neural SDE; DPG, SOAR, self-play and pathwise meta-learning adapt
+neural-SDE generators. Replay and mutation also execute neural SDEs. No categorical
+market selector is part of the active training configuration.
+
+By default, each round draws **1,024 fresh target-training paths** from the fixed
+initial neural-SDE prior, independently of the adapting teacher. DPG, SOAR and
+pathwise meta-learning share that exact batch across all within-round comparisons.
+Self-play's alignment reward remains defined on its generated round pool.
+Feedback randomness is part of the checkpointed RNG stream.
+
+The fixed **2,048-path validation set** uses a separate random stream. It is
+measured every **16 rounds**, at the last requested round, and when a completed
+round exhausts the soft time budget. Validation never enters teacher rewards.
+A separate, untouched final test set is still required for scientific evaluation.
+
+For a declared target distribution, supply both `--feedback-paths training.npz`
+and `--validation-paths validation.npz`. Each contains
+`states[episodes,n_steps+1,1+n_latent]`. Training draws a uniform batch without
+replacement each round; the training population must contain at least
+`--feedback-size` paths. Supply genuinely disjoint files from the desired
+neural-SDE target law: hashes reject identical files but cannot certify data
+provenance or absence of partially overlapping rows. Validation uses its entire
+file. No loss-based mining or target reweighting is applied.
+
+Entropic estimates on finite batches are downward biased and may miss rare
+losses. Every feedback/validation evaluation logs ESS, ESS/batch size, maximum
+exponential weight, sample size and an `entropic_tail_underresolved` flag. The
+flag threshold is configurable with `--entropic-ess-fraction` (default 0.1).
+It is a concentration diagnostic, not proof that unseen tails are covered.
+Increase `--feedback-size` when feedback is underresolved; check stability on
+larger independent validation samples. No automatic batch-size adaptation or
+bias correction is claimed. These starting sizes have not been GPU-validated.
 
 The premium is fixed by `--premium` for every path and teacher. The simulator's
 Q dynamics are available but no implied-volatility surface or Q-priced mark

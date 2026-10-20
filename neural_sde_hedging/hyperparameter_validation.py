@@ -108,7 +108,7 @@ def run_trial(spec, rounds, tag, output, evaluator, template, dev, contract):
                "--method", spec["method"], "--output", str(folder),
                "--rounds", str(rounds), "--seconds", "5400", "--n-steps", "126",
                "--groups", "4", "--items", str(spec["items"]), "--inner-steps", "8",
-               "--feedback-size", "512", "--payoff-cap", "1", "--seed", "20261017",
+               "--feedback-size", "1024", "--payoff-cap", "1", "--seed", "20261017",
                "--student-lr", str(spec["student_lr"]), "--teacher-lr", str(spec["teacher_lr"]),
                "--warmup-steps", str(spec["warmup_steps"]), "--min-free-gb", "3"]
     save_json(destination / "command.json", command)
@@ -219,8 +219,8 @@ def main():
     chex.assert_shape(dev, (2048, 127, 3))
     chex.assert_shape(confirmation, (8192, 127, 3))
     save_json(output / "evaluation-protocol.json", {
-        "seed": 20261017, "feedback_seed": 20261020, "development_seed": 20261121,
-        "confirmation_seed": 20261122, "feedback_episodes": 512, "development_episodes": 2048,
+        "seed": 20261017, "validation_seed": 20261020, "feedback_sampling": "fresh per-round checkpointed RNG", "development_seed": 20261121,
+        "confirmation_seed": 20261122, "feedback_episodes": 1024, "development_episodes": 2048,
         "confirmation_episodes": 8192, "screen_rounds": 64, "confirmation_rounds": 256,
         "law": "fixed initial neural-SDE prior P; demonstration target",
         "development_sha256": hashlib.sha256(np.asarray(dev).tobytes()).hexdigest(),
@@ -290,7 +290,7 @@ def main():
     plot_results(output, records)
     save_json(output / "summary.json", {"complete": True, "trial_count": len(records),
               "selected": selected, "confirmation": confirmations,
-              "scope": "one-seed prior-target hyperparameter pilot; not final easy/base/hard benchmark"})
+              "scope": "one-seed prior-target hyperparameter pilot; not final scientific validation"})
     print("HYPERPARAMETER VALIDATION COMPLETE", flush=True)
 
 

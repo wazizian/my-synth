@@ -1,8 +1,8 @@
 """GPU-only, resumable neural-SDE curriculum training with paper mechanisms.
 
 No work runs at import. Run as a module on an explicitly provisioned GPU.
-The fixed prior supplies demonstration feedback; production studies should
-provide independently frozen target paths using --feedback-paths.
+The fixed neural-SDE prior supplies demonstration feedback; production studies
+should provide independent target training and validation path files.
 """
 
 import argparse
@@ -29,7 +29,7 @@ from .checkpoint_codec import CheckpointPickler
 from .config import SDEConfig
 from .dynamics import NeuralSDE, path_log_prob, sample_noise, simulate
 from .hedger import Contract, Hedger, terminal_losses
-from .methods import (dpg_attributions, grpo_objective, promote_soar,
+from .methods import (pathwise_meta_learning, dpg_attributions, grpo_objective, promote_soar,
                       selfplay_objective, selfplay_rewards, soar_branches,
                       soar_teacher_objective)
 from .replay import ProgramBank, build_pool, niche_of_path
@@ -157,6 +157,17 @@ def run(args):
     """Run one method/initialization on GPU; resume every learner/teacher/RNG state."""
     if jax.default_backend() != "gpu":
         raise RuntimeError("Only Ruff and py_compile are authorized locally; training requires GPU")
+    # Defaults keep programmatic callers compatible; persist them in the fingerprint.
+    args.validation_size = getattr(args, "validation_size", 2048)
+    args.validation_every = getattr(args, "validation_every", 16)
+    args.validation_paths = getattr(args, "validation_paths", None)
+    args.entropic_ess_fraction = getattr(args, "entropic_ess_fraction", .1)
+    if min(args.feedback_size, args.validation_size, args.validation_every) < 1:
+        raise ValueError("Feedback/validation sizes and interval must be positive")
+    if not 0 < args.entropic_ess_fraction <= 1:
+        raise ValueError("Entropic ESS fraction must lie in (0,1]")
+    if args.feedback_paths and not args.validation_paths:
+        raise ValueError("External feedback requires a separate --validation-paths file")
     began = time.monotonic()
     if args.seconds <= 0 or args.rounds < 1 or args.groups < 2 or args.items < 2 or args.inner_steps < 1:
         raise ValueError("Positive budget/steps and at least two groups/items required")
@@ -212,35 +223,57 @@ def run(args):
             entry.teacher = restored_programs[identity]
     history = out / "learner-history"
     history.mkdir(exist_ok=True)
-    # Feedback is frozen outside every teacher update, never regenerated from
-    # the learned teacher. Its data hash becomes part of checkpoint identity.
+    # Only target-training data may feed teacher rewards. Validation is disjoint.
+    feedback_population = None
+    feedback_hash = "fresh-neural-sde-prior-demonstration"
     if args.feedback_paths:
         feedback_file = Path(args.feedback_paths)
         feedback_hash = hashlib.sha256(feedback_file.read_bytes()).hexdigest()
         with np.load(feedback_file, allow_pickle=False) as data:
-            feedback_states = jnp.asarray(data["states"])
+            feedback_population = jnp.asarray(data["states"])
+        chex.assert_shape(feedback_population, (feedback_population.shape[0], config.n_steps + 1, config.state_dim))
+        if feedback_population.shape[0] < args.feedback_size:
+            raise ValueError("Feedback population smaller than the requested batch")
+    if args.validation_paths:
+        validation_file = Path(args.validation_paths)
+        validation_hash = hashlib.sha256(validation_file.read_bytes()).hexdigest()
+        if args.feedback_paths and validation_hash == feedback_hash:
+            raise ValueError("Feedback and validation files must differ")
+        with np.load(validation_file, allow_pickle=False) as data:
+            validation_states = jnp.asarray(data["states"])
     else:
-        feedback_hash = "fixed-prior-demonstration-only"
-        feedback_states = simulate(prior, sample_noise(jax.random.key(args.seed + 3), args.feedback_size, config), config).states
-    chex.assert_shape(feedback_states, (feedback_states.shape[0], config.n_steps + 1, config.state_dim))
-    if "feedback_hash" in state and state["feedback_hash"] != feedback_hash:
-        raise RuntimeError("Feedback dataset changed during resume")
-    state["feedback_hash"] = feedback_hash
+        validation_hash = "independent-neural-sde-prior-validation"
+        validation_states = simulate(prior, sample_noise(jax.random.key(args.seed + 3), args.validation_size, config), config).states
+    chex.assert_shape(validation_states, (validation_states.shape[0], config.n_steps + 1, config.state_dim))
+    if validation_states.shape[0] < 1:
+        raise ValueError("Validation must contain at least one path")
+    for name, identity in (("feedback_hash", feedback_hash), ("validation_hash", validation_hash)):
+        if name in state and state[name] != identity:
+            raise RuntimeError("Target dataset changed during resume")
+        state[name] = identity
 
-    def target(student):
-        """Return risk on the same fixed feedback paths for every compared branch."""
+    def target(student, target_states):
+        """Return entropic risk on an explicit shared target batch [B,T,D]."""
         losses = terminal_losses(eqx.combine(student[0], learner_static),
-                                 SimpleNamespace(log_spot=feedback_states[..., 0]), contract)
+                                 SimpleNamespace(log_spot=target_states[..., 0]), contract)
         return entropic(losses, jnp.ones_like(losses), args.gamma)
 
-    def feedback_metrics(student):
-        """Return empirical risk, fractional CVaR95 and std on frozen feedback."""
+    def feedback_metrics(student, target_states):
+        """Return target risks and diagnostics of finite-sample tail concentration."""
         losses = terminal_losses(eqx.combine(student[0], learner_static),
-                                 SimpleNamespace(log_spot=feedback_states[..., 0]), contract)
+                                 SimpleNamespace(log_spot=target_states[..., 0]), contract)
         result = risk_metrics(losses, args.gamma)
+        batch = losses.shape[0]
+        chex.assert_shape(losses, (batch,))
         weights = jax.nn.softmax(args.gamma * losses)
-        chex.assert_shape(weights, losses.shape)
-        result["entropic_ess"] = 1. / jnp.sum(weights**2)
+        chex.assert_shape(weights, (batch,))
+        ess = 1. / jnp.sum(weights**2)
+        chex.assert_shape(ess, ())
+        result["entropic_ess"] = ess
+        result["entropic_ess_fraction"] = ess / batch
+        result["entropic_max_weight"] = jnp.max(weights)
+        result["entropic_tail_underresolved"] = ess < args.entropic_ess_fraction * batch
+        result["sample_size"] = jnp.asarray(batch)
         return result
 
     def block(student, states, weights, key):
@@ -256,16 +289,18 @@ def run(args):
     compiled_simulate = eqx.filter_jit(simulate)
     compiled_teacher_gradient = eqx.filter_jit(jax.value_and_grad(teacher_loss, has_aux=True))
 
-    def attributed_round(datasets, key):
+    def attributed_round(datasets, key, target_states):
         """Run one reset DPG inner calculation on grouped datasets and RNG key."""
         return dpg_attributions(initial_student, datasets,
-                                lambda s, d, w: block(s, d, w, key), target,
+                                lambda s, d, w: block(s, d, w, key),
+                                lambda s: target(s, target_states),
                                 (args.items,), cross_group_batching=True)
 
-    def branched_round(student, datasets, keys):
-        """Train all SOAR repeats from one baseline on common fixed feedback."""
+    def branched_round(student, datasets, keys, target_states):
+        """Train all SOAR repeats from one baseline on common per-round feedback."""
         return soar_branches(student, datasets, keys,
-                             lambda s, d, k: block(s, d, jnp.ones((args.items,)), k), target)
+                             lambda s, d, k: block(s, d, jnp.ones((args.items,)), k),
+                             lambda s: target(s, target_states))
 
     def aligned_rewards(student, historical, pool):
         """Compute full-pool self-play JVP reward with actual optimizer moments."""
@@ -282,17 +317,49 @@ def run(args):
     compiled_attributions = eqx.filter_jit(attributed_round)
     compiled_branches = eqx.filter_jit(branched_round)
     compiled_alignment = eqx.filter_jit(aligned_rewards)
+
+    def pathwise_round(params, student, noise, key, target_states):
+        """Return exact one-block teacher objective and live student/path auxiliaries."""
+        teacher = eqx.combine(params, teacher_static)
+        return pathwise_meta_learning(
+            teacher, student, noise, key,
+            lambda model, z: simulate(model, z, config),
+            lambda s, data, k: block(s, data, jnp.ones((data.shape[0],)), k),
+            lambda s: target(s, target_states))
+
+    compiled_pathwise_gradient = eqx.filter_jit(
+        jax.value_and_grad(pathwise_round, has_aux=True))
     resumed_seconds = state["seconds"]
     while state["round_index"] < args.rounds and resumed_seconds + time.monotonic() - began < args.seconds:
         if shutil.disk_usage(out).free < args.min_free_gb * 1024**3:
             raise RuntimeError("Storage reserve reached; preserve checkpoint and export before resuming")
         round_index = state["round_index"]
         key = jax.random.wrap_key_data(state["key_data"])
-        next_key, draw_key, inner_key = jax.random.split(key, 3)
+        next_key, draw_key, inner_key, feedback_key = jax.random.split(key, 4)
+        # One target batch per round, independent of teacher-generated training data.
+        if feedback_population is None:
+            feedback_states = compiled_simulate(
+                prior, sample_noise(feedback_key, args.feedback_size, config), config).states
+        else:
+            indices = jax.random.choice(feedback_key, feedback_population.shape[0],
+                                        (args.feedback_size,), replace=False)
+            chex.assert_shape(indices, (args.feedback_size,))
+            feedback_states = feedback_population[indices]
+        chex.assert_shape(feedback_states, (args.feedback_size, config.n_steps + 1, config.state_dim))
         teacher = eqx.combine(state["teacher"], teacher_static)
         student_before = state["student"]
         metrics = {}
-        if args.method == "selfplay":
+        if args.method == "pathwise-meta-learning":
+            noise = sample_noise(draw_key, args.groups * args.items, config)
+            ((objective_value, (student, pool, before_risk)), gradient) = compiled_pathwise_gradient(
+                state["teacher"], student_before, noise, inner_key, feedback_states)
+            rewards = jnp.reshape(-objective_value, (1,))
+            behavior = pool.log_density
+            reference = compiled_density(prior, pool)
+            teacher_metrics = {"target_before": before_risk,
+                               "pathwise_risk_change": objective_value}
+            apply_teacher = True
+        elif args.method == "selfplay":
             snapshot_path = history / f"{round_index:08d}.pkl"
             atomic_checkpoint(snapshot_path, student_before[0])
             old_path = history / f"{round_index // 2:08d}.pkl"
@@ -324,11 +391,11 @@ def run(args):
                                          jnp.ones((batch,)), inner_key)
                 rewards = jnp.zeros((batch,))
             elif args.method == "dpg":
-                student, rewards, risk = compiled_attributions(datasets, inner_key)
+                student, rewards, risk = compiled_attributions(datasets, inner_key, feedback_states)
                 metrics["target_after"] = risk
             else:
                 repeat_keys = jax.random.split(inner_key, args.groups * 4).reshape((args.groups, 4))
-                branches, rewards = compiled_branches(student_before, datasets, repeat_keys)
+                branches, rewards = compiled_branches(student_before, datasets, repeat_keys, feedback_states)
                 state["soar_reward_window"] = (
                     state["soar_reward_window"] + [jnp.mean(rewards)])[-3:]
                 smoothed_reward = jnp.mean(jnp.stack(state["soar_reward_window"]))
@@ -348,19 +415,28 @@ def run(args):
             objective_value, teacher_metrics, gradient = jnp.array(0.), {}, ()
             candidate_teacher = state["teacher"]
             new_teacher_optimizer = state["teacher_optimizer"]
-        else:
+        elif args.method != "pathwise-meta-learning":
             (objective_value, teacher_metrics), gradient = compiled_teacher_gradient(
                 state["teacher"], teacher_static, pool, config, args.method,
                 behavior, reference, rewards, mutation_mask)
             teacher_updates, new_teacher_optimizer = teacher_optimizer.update(gradient, state["teacher_optimizer"], state["teacher"])
             candidate_teacher = optax.apply_updates(state["teacher"], teacher_updates)
+        else:
+            teacher_updates, new_teacher_optimizer = teacher_optimizer.update(
+                gradient, state["teacher_optimizer"], state["teacher"])
+            candidate_teacher = optax.apply_updates(state["teacher"], teacher_updates)
         # Fail before checkpoint commit. No hidden replacement of nonfinite
         # losses/rewards; the previous atomic checkpoint remains recoverable.
-        target_risk = compiled_target(student)
-        measured_feedback = compiled_metrics(student)
+        target_risk = compiled_target(student, feedback_states)
+        measured_feedback = compiled_metrics(student, feedback_states)
+        measured_validation = {}
+        elapsed = resumed_seconds + time.monotonic() - began
+        if ((round_index + 1) % args.validation_every == 0
+                or round_index + 1 >= args.rounds or elapsed >= args.seconds):
+            measured_validation = compiled_metrics(student, validation_states)
         for value in jax.tree.leaves((student, candidate_teacher, new_teacher_optimizer, objective_value,
                                      teacher_metrics, gradient, rewards, behavior, reference, pool.states,
-                                     target_risk, measured_feedback)):
+                                     target_risk, measured_feedback, measured_validation)):
             if not bool(jax.device_get(jnp.all(jnp.isfinite(value)))):
                 raise RuntimeError("Nonfinite update; previous checkpoint preserved")
         state["student"] = jax.tree.map(jax.lax.stop_gradient, student)
@@ -377,6 +453,7 @@ def run(args):
                                       "reward_max_abs": jnp.max(jnp.abs(rewards)),
                                       "round": state["round_index"], "seconds": state["seconds"]}
         metrics |= {"feedback_" + name: value for name, value in measured_feedback.items()}
+        metrics |= {"validation_" + name: value for name, value in measured_validation.items()}
         atomic_checkpoint(latest, state)
         with (out / "progress.jsonl").open("a") as stream:
             stream.write(json.dumps({name: float(jax.device_get(value)) for name, value in metrics.items()}, allow_nan=False) + "\n")
@@ -388,7 +465,7 @@ def run(args):
 def main():
     """Parse one-seed GPU job configuration and run the selected teacher method."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay"), required=True)
+    parser.add_argument("--method", choices=("baseline", "dpg", "soar", "selfplay", "pathwise-meta-learning"), required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--seconds", type=float, required=True)
     parser.add_argument("--rounds", type=int, default=1000)
@@ -404,7 +481,11 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--promotion-threshold", type=float, default=0.0001)
     parser.add_argument("--feedback-paths")
-    parser.add_argument("--feedback-size", type=int, default=512)
+    parser.add_argument("--feedback-size", type=int, default=1024)
+    parser.add_argument("--validation-paths")
+    parser.add_argument("--validation-size", type=int, default=2048)
+    parser.add_argument("--validation-every", type=int, default=16)
+    parser.add_argument("--entropic-ess-fraction", type=float, default=.1)
     parser.add_argument("--payoff-cap", type=float)
     parser.add_argument("--premium", type=float, default=0.)
     parser.add_argument("--min-free-gb", type=float, default=1.)
