@@ -1,0 +1,93 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "network": "gru",
+      "width": 32,
+      "output": {
+        "max_abs": 1.1920928955078125e-07,
+        "relative_l2": 6.906555003170595e-08
+      },
+      "gradient": {
+        "max_abs": 2.384185791015625e-07,
+        "relative_l2": 1.0575764154387976e-07
+      },
+      "jvp": {
+        "max_abs": 2.9802322387695312e-08,
+        "relative_l2": 3.3806266947652718e-09
+      },
+      "hessian_vector": {
+        "max_abs": 1.1920928955078125e-07,
+        "relative_l2": 1.2447638445532944e-07
+      },
+      "finite_difference": -0.32711026072502136,
+      "directional_derivative": -0.3274023234844208
+    },
+    {
+      "network": "mlp",
+      "width": 32,
+      "output": {
+        "max_abs": 3.725290298461914e-08,
+        "relative_l2": 2.371182934850822e-07
+      },
+      "gradient": {
+        "max_abs": 5.960464477539063e-08,
+        "relative_l2": 2.3814097590005682e-07
+      },
+      "jvp": {
+        "max_abs": 1.862645149230957e-08,
+        "relative_l2": 2.987482074301829e-07
+      },
+      "hessian_vector": {
+        "max_abs": 5.21540641784668e-08,
+        "relative_l2": 2.598215458311299e-07
+      },
+      "finite_difference": -0.04740804061293602,
+      "directional_derivative": -0.04742080718278885
+    },
+    {
+      "network": "gru",
+      "width": 64,
+      "output": {
+        "max_abs": 1.1920928955078125e-07,
+        "relative_l2": 7.510660767700375e-08
+      },
+      "gradient": {
+        "max_abs": 4.76837158203125e-07,
+        "relative_l2": 8.726171233329135e-08
+      },
+      "jvp": {
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "hessian_vector": {
+        "max_abs": 1.4901161193847656e-07,
+        "relative_l2": 1.1576752522815877e-07
+      },
+      "finite_difference": -7.8916544914245605,
+      "directional_derivative": -7.891075611114502
+    },
+    {
+      "network": "mlp",
+      "width": 64,
+      "output": {
+        "max_abs": 4.470348358154297e-08,
+        "relative_l2": 1.811408831229992e-07
+      },
+      "gradient": {
+        "max_abs": 7.450580596923828e-08,
+        "relative_l2": 2.0062206662934324e-07
+      },
+      "jvp": {
+        "max_abs": 1.341104507446289e-07,
+        "relative_l2": 1.0117867064704244e-06
+      },
+      "hessian_vector": {
+        "max_abs": 2.384185791015625e-07,
+        "relative_l2": 3.277268338171827e-07
+      },
+      "finite_difference": 0.06626173108816147,
+      "directional_derivative": 0.06624657660722733
+    }
+  ]
+}

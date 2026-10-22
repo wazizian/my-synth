@@ -1,0 +1,70 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 63, in <module>
+    main()
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 50, in main
+    fused_gradient = eqx.filter_jit(eqx.filter_grad(fused_risk))(inputs)
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 44, in fused_risk
+    return risk(fused(*inputs))
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 36, in fused
+    return PersistentHedger(model).terminal_losses(prices, historical=historical)
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_module/_prebuilt.py", line 33, in __call__
+    return self.__func__(self.__self__, *args, **kwargs)
+  File "/workspace/pallas/pallas_study/persistent.py", line 213, in terminal_losses
+    return losses(parameters, log_spot, cost, cap, premium, strike, historical)
+jax._src.source_info_util.JaxStackTraceBeforeTransformation: NotImplementedError: Only arguments with shape [..., 1] are supported.
+
+The preceding stack trace is the source of the JAX operation that, once transformed by JAX, triggered the following exception.
+
+--------------------
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 63, in <module>
+    main()
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 50, in main
+    fused_gradient = eqx.filter_jit(eqx.filter_grad(fused_risk))(inputs)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_jit.py", line 209, in __call__
+    return _call(self, False, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_jit.py", line 263, in _call
+    marker, _, _ = out = jit_wrapper._cached(
+                         ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 1330, in _pallas_call_lowering
+    return mlir.lower_per_platform(ctx, "pallas_call",
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 1326, in gpu_lowering
+    return pallas_call_registration.pallas_call_lowering(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/pallas_call_registration.py", line 95, in pallas_call_lowering
+    lowering_result = lowering.lower_jaxpr_to_triton_module(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 370, in lower_jaxpr_to_triton_module
+    () = lower_jaxpr_to_triton_ir(ctx, jaxpr, block_infos, *entry.arguments)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 419, in lower_jaxpr_to_triton_ir
+    outvals = rule(rule_ctx, *invals, **eqn.params)
+    ^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 2642, in _scan_lowering_rule
+    for_out = _lower_jaxpr_to_for_loop(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 2596, in _lower_jaxpr_to_for_loop
+    all_out = lower_jaxpr_to_triton_ir(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 419, in lower_jaxpr_to_triton_ir
+    outvals = rule(rule_ctx, *invals, **eqn.params)
+    ^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 1831, in _concatenate_lowering_rule
+    raise NotImplementedError(
+NotImplementedError: Only arguments with shape [..., 1] are supported.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+COMPILE jax
+COMPILE pallas_gru
+META FAILED pallas_gru ValueError: Too few leaves for PyTreeDef; expected 2, got 1
+COMPILE pallas_mlp

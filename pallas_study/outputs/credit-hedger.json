@@ -1,0 +1,84 @@
+{
+  "task": "hedger",
+  "batch": 128,
+  "steps": 1260,
+  "dtype": "float64",
+  "results": [
+    {
+      "variant": "jax",
+      "update_ms": [
+        500.58885764641064,
+        501.3409253830711,
+        501.17016040409607,
+        500.613065281262,
+        500.22717332467437,
+        500.7841720556219,
+        500.6635616688679
+      ],
+      "gradient_compile_s": 0.5016573139000684,
+      "loss_error": 0.0,
+      "gradient_error": {
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "correct": true,
+      "parameter_error_after_10_updates": {
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "loss_after_10_updates": 0.020352882909458626,
+      "median_update_ms": 500.6635616688679
+    },
+    {
+      "variant": "pallas_jvp",
+      "update_ms": [
+        682.0001342954735,
+        681.8272376743456,
+        681.7923789688697,
+        680.9899236541241,
+        681.6752733041843,
+        681.2336953201642,
+        681.8864236896237
+      ],
+      "gradient_compile_s": 8.821093931095675,
+      "loss_error": 9.020562075079397e-17,
+      "gradient_error": {
+        "max_abs": 2.190088388420719e-17,
+        "relative_l2": 3.0766638699985143e-16
+      },
+      "correct": true,
+      "parameter_error_after_10_updates": {
+        "max_abs": 1.89605275924265e-15,
+        "relative_l2": 3.451202738635087e-16
+      },
+      "loss_after_10_updates": 0.020352882909458716,
+      "median_update_ms": 681.7923789688697
+    },
+    {
+      "variant": "pallas_saved",
+      "update_ms": [
+        501.3877779711038,
+        501.4659966497372,
+        501.05219264514744,
+        501.4497043254475,
+        501.25069039252895,
+        501.7589920510848,
+        501.318570614482
+      ],
+      "gradient_compile_s": 8.54136016103439,
+      "loss_error": 9.020562075079397e-17,
+      "gradient_error": {
+        "max_abs": 2.2768245622195593e-17,
+        "relative_l2": 4.0128823928046595e-16
+      },
+      "correct": true,
+      "parameter_error_after_10_updates": {
+        "max_abs": 1.6583956430338276e-15,
+        "relative_l2": 3.6735087870093303e-16
+      },
+      "loss_after_10_updates": 0.020352882909458716,
+      "median_update_ms": 501.3877779711038
+    }
+  ],
+  "complete": true
+}

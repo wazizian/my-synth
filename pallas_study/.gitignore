@@ -1,0 +1,18 @@
+# Publish the compact evidence bundle alongside its source and report.
+!*.json
+!*.csv
+!outputs/
+!outputs/*.json
+!outputs/*.txt
+!outputs/*.log
+!outputs/*.exit
+!watchdog.log
+
+# Keep credentials, machine access state, and transient process files local.
+instance.json
+offers.json
+known_hosts
+__pycache__/
+sync-manifest.json
+*.pid
+*.done

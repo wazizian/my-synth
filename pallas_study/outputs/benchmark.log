@@ -1,0 +1,24 @@
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 1.1575983371585608
+RESULT hedger pallas_gru 1.2967989314347506
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 1.1169803328812122
+RESULT historical pallas_gru 1.0607920121401548
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+RESULT sde_score jax 2.778357360512018
+RESULT sde_score pallas_mlp 2.7492696729799113
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 2.3470743714521327
+RESULT sde_pathwise pallas_mlp 2.2642416103432574
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 3.1109663347403207
+RESULT joint pallas_gru 3.490998332078258
+RESULT joint pallas_mlp 3.089539318655928
+RESULT joint pallas_both 3.031480669354399

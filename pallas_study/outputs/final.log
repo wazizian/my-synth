@@ -1,0 +1,135 @@
+{"network": "gru", "width": 32, "output": {"max_abs": 1.1920928955078125e-07, "relative_l2": 6.906555003170595e-08}, "gradient": {"max_abs": 2.384185791015625e-07, "relative_l2": 1.0575764154387976e-07}, "jvp": {"max_abs": 2.9802322387695312e-08, "relative_l2": 3.3806266947652718e-09}, "hessian_vector": {"max_abs": 1.1920928955078125e-07, "relative_l2": 1.2447638445532944e-07}, "finite_difference": -0.32711026072502136, "directional_derivative": -0.3274023234844208}
+{"network": "mlp", "width": 32, "output": {"max_abs": 3.725290298461914e-08, "relative_l2": 2.371182934850822e-07}, "gradient": {"max_abs": 5.960464477539063e-08, "relative_l2": 2.3814097590005682e-07}, "jvp": {"max_abs": 1.862645149230957e-08, "relative_l2": 2.987482074301829e-07}, "hessian_vector": {"max_abs": 5.21540641784668e-08, "relative_l2": 2.598215458311299e-07}, "finite_difference": -0.04740804061293602, "directional_derivative": -0.04742080718278885}
+{"network": "gru", "width": 64, "output": {"max_abs": 1.1920928955078125e-07, "relative_l2": 7.510660767700375e-08}, "gradient": {"max_abs": 4.76837158203125e-07, "relative_l2": 8.726171233329135e-08}, "jvp": {"max_abs": 0.0, "relative_l2": 0.0}, "hessian_vector": {"max_abs": 1.4901161193847656e-07, "relative_l2": 1.1576752522815877e-07}, "finite_difference": -7.8916544914245605, "directional_derivative": -7.891075611114502}
+{"network": "mlp", "width": 64, "output": {"max_abs": 4.470348358154297e-08, "relative_l2": 1.811408831229992e-07}, "gradient": {"max_abs": 7.450580596923828e-08, "relative_l2": 2.0062206662934324e-07}, "jvp": {"max_abs": 1.341104507446289e-07, "relative_l2": 1.0117867064704244e-06}, "hessian_vector": {"max_abs": 2.384185791015625e-07, "relative_l2": 3.277268338171827e-07}, "finite_difference": 0.06626173108816147, "directional_derivative": 0.06624657660722733}
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 12.186434213072062
+RESULT hedger pallas_gru 10.223982692696154
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 12.787390407174826
+RESULT historical pallas_gru 10.717844706960022
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+RESULT sde_score jax 29.544979007914662
+RESULT sde_score pallas_mlp 29.298772709444165
+COMPILE sde_score_flat jax
+COMPILE sde_score_flat pallas_mlp
+RESULT sde_score_flat jax 1.360200298950076
+RESULT sde_score_flat pallas_mlp 1.2416456127539277
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 40.19283258821815
+RESULT sde_pathwise pallas_mlp 35.92605029698461
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 43.70442458894104
+RESULT joint pallas_gru 41.70316308736801
+RESULT joint pallas_mlp 39.27664649672806
+RESULT joint pallas_both 37.23609179724008
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 17.300788895227015
+RESULT hedger pallas_gru 11.344133596867323
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 17.89713001344353
+RESULT historical pallas_gru 11.746634705923498
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+RESULT sde_score jax 43.23638330679387
+RESULT sde_score pallas_mlp 37.504683807492256
+COMPILE sde_score_flat jax
+COMPILE sde_score_flat pallas_mlp
+RESULT sde_score_flat jax 2.5399029022082686
+RESULT sde_score_flat pallas_mlp 2.673524897545576
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 59.856247319839895
+RESULT sde_pathwise pallas_mlp 54.50176429003477
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 60.05891819950193
+RESULT joint pallas_gru 57.275483990088105
+RESULT joint pallas_mlp 54.35289749875665
+RESULT joint pallas_both 51.43103909213096
+COMPILE jax
+COMPILE pallas_gru
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/pallas/pallas_study/meta_benchmark.py", line 118, in <module>
+    main()
+  File "/workspace/pallas/pallas_study/meta_benchmark.py", line 80, in main
+    result = compiled(params, student, noise, feedback)
+  File "/workspace/pallas/pallas_study/meta_benchmark.py", line 60, in objective
+    value, _ = pathwise_meta_learning(eqx.combine(candidate, static), current_student,
+  File "/workspace/pallas/neural_sde_hedging/methods.py", line 29, in pathwise_meta_learning
+    trained = block_fn(student, paths.states, key)
+  File "/workspace/pallas/pallas_study/meta_benchmark.py", line 53, in block_fn
+    return learner_block(state, states, jnp.ones(batch), learner_static,
+  File "/workspace/pallas/neural_sde_hedging/training.py", line 92, in learner_block
+    result, _ = jax.lax.scan(jax.checkpoint(step), student, jax.random.split(key, steps))
+  File "/workspace/pallas/neural_sde_hedging/training.py", line 87, in step
+    value, gradient = jax.value_and_grad(objective)(params)
+  File "/workspace/pallas/neural_sde_hedging/training.py", line 81, in objective
+    losses = losses_fn(eqx.combine(candidate, static), observable, contract)
+  File "/workspace/pallas/neural_sde_hedging/hedger.py", line 108, in terminal_losses
+    (_, cash, shares), _ = jax.lax.scan(step, (hidden, zeros + contract.premium, zeros), jnp.arange(n_time - 1))
+  File "/workspace/pallas/neural_sde_hedging/hedger.py", line 94, in step
+    next_hidden = jax.vmap(model.recurrent)(features, previous_hidden)
+  File "/workspace/pallas/pallas_study/kernels.py", line 190, in __call__
+    return function((cell.weight_ih, cell.weight_hh, cell.bias, cell.bias_n), x, hidden)
+jax._src.source_info_util.JaxStackTraceBeforeTransformation: ValueError: Too few leaves for PyTreeDef; expected 4, got 3
+
+The preceding stack trace is the source of the JAX operation that, once transformed by JAX, triggered the following exception.
+
+--------------------
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/pallas/pallas_study/meta_benchmark.py", line 118, in <module>
+    main()
+  File "/workspace/pallas/pallas_study/meta_benchmark.py", line 80, in main
+    result = compiled(params, student, noise, feedback)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_jit.py", line 209, in __call__
+    return _call(self, False, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_jit.py", line 263, in _call
+    marker, _, _ = out = jit_wrapper._cached(
+                         ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas/pallas_study/meta_benchmark.py", line 60, in objective
+    value, _ = pathwise_meta_learning(eqx.combine(candidate, static), current_student,
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas/neural_sde_hedging/methods.py", line 29, in pathwise_meta_learning
+    trained = block_fn(student, paths.states, key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas/pallas_study/meta_benchmark.py", line 53, in block_fn
+    return learner_block(state, states, jnp.ones(batch), learner_static,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas/neural_sde_hedging/training.py", line 92, in learner_block
+    result, _ = jax.lax.scan(jax.checkpoint(step), student, jax.random.split(key, steps))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/lib/python3.12/contextlib.py", line 81, in inner
+    return func(*args, **kwds)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 141, in _pallas_call_jvp_rule
+    jvp_jaxpr_, _ = ad.jvp_jaxpr(closed_jaxpr, nonzero_tangents_with_outputs, [])
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/primitives.py", line 424, in _load_jvp
+    load_p.bind(
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/primitives.py", line 379, in _load_abstract_eval
+    ref, transforms, _, _ = args_tree.unflatten(avals_flat)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Too few leaves for PyTreeDef; expected 4, got 3
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

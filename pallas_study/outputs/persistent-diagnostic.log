@@ -1,0 +1,254 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 63, in <module>
+    main()
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 50, in main
+    fused_gradient = eqx.filter_jit(eqx.filter_grad(fused_risk))(inputs)
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 44, in fused_risk
+    return risk(fused(*inputs))
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 36, in fused
+    return PersistentHedger(model).terminal_losses(prices, historical=historical)
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_module/_prebuilt.py", line 33, in __call__
+    return self.__func__(self.__self__, *args, **kwargs)
+  File "/workspace/pallas/pallas_study/persistent.py", line 211, in terminal_losses
+    return losses(parameters, log_spot, cost, cap, premium, strike, historical)
+jax._src.source_info_util.JaxStackTraceBeforeTransformation: AssertionError: ('f32', 'i1')
+
+The preceding stack trace is the source of the JAX operation that, once transformed by JAX, triggered the following exception.
+
+--------------------
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 419, in lower_jaxpr_to_triton_ir
+    outvals = rule(rule_ctx, *invals, **eqn.params)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 1304, in signless_rule
+    return fn(x, y)
+           ^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 1179, in _mul
+    assert x.type == y.type, (str(x.type), str(y.type))
+           ^^^^^^^^^^^^^^^^
+AssertionError: ('f32', 'i1')
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 63, in <module>
+    main()
+  File "/workspace/pallas/pallas_study/validate_persistent.py", line 50, in main
+    fused_gradient = eqx.filter_jit(eqx.filter_grad(fused_risk))(inputs)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_jit.py", line 209, in __call__
+    return _call(self, False, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_jit.py", line 263, in _call
+    marker, _, _ = out = jit_wrapper._cached(
+                         ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 1330, in _pallas_call_lowering
+    return mlir.lower_per_platform(ctx, "pallas_call",
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 1326, in gpu_lowering
+    return pallas_call_registration.pallas_call_lowering(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/pallas_call_registration.py", line 95, in pallas_call_lowering
+    lowering_result = lowering.lower_jaxpr_to_triton_module(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 370, in lower_jaxpr_to_triton_module
+    () = lower_jaxpr_to_triton_ir(ctx, jaxpr, block_infos, *entry.arguments)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 419, in lower_jaxpr_to_triton_ir
+    outvals = rule(rule_ctx, *invals, **eqn.params)
+  ^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 2642, in _scan_lowering_rule
+    for_out = _lower_jaxpr_to_for_loop(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 2596, in _lower_jaxpr_to_for_loop
+    all_out = lower_jaxpr_to_triton_ir(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 426, in lower_jaxpr_to_triton_ir
+    raise LoweringError(
+jax._src.pallas.triton.lowering.LoweringError: Exception while lowering eqn:
+  a:f32[] = mul 0.0003:f32[] b
+With context:
+  LoweringRuleContext(context=ModuleContext(name='persistent_hedger_backward', grid_mapping=GridMapping(grid=(32,), block_mappings=(BlockMapping(block_shape=(Blocked(block_size=96), Blocked(block_size=4))), BlockMapping(block_shape=(Blocked(block_size=96), Blocked(block_size=32))), BlockMapping(block_shape=(Blocked(block_size=96),)), BlockMapping(block_shape=(Blocked(block_size=32),)), BlockMapping(block_shape=(Blocked(block_size=1), Blocked(block_size=32))), BlockMapping(block_shape=(Blocked(block_size=1),)), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=2))), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=1), Blocked(block_size=200))), BlockMapping(block_shape=(Blocked(block_size=32),)), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=96), Blocked(block_size=4))), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=96), Blocked(block_size=32))), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=96))), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=32))), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=1), Blocked(block_size=32))), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=1))), BlockMapping(block_shape=(Blocked(block_size=32), Blocked(block_size=2))))), program_ids=[<jaxlib.mlir._mlir_libs._mlir.ir.OpResult object at 0x7f84a429c430>], platform='cuda'), avals_in=[ShapedArray(float32[], weak_type=True), ShapedArray(float32[], weak_type=True)], avals_out=[ShapedArray(float32[], weak_type=True)], block_infos=[None, None])
+With inval types=[None, IntegerType(i1)]
+In jaxpr:
+{ lambda ; a:i32[] b:Ref{f32[32,1,200]} c:i32[32] d:i32[4] e:Ref{f32[32,2]} f:f32[]
+    g:f32[32] h:f32[32] i:f32[128,32] j:f32[128,4] k:Ref{f32[32,2]} l:i32[] m:f32[32]
+    n:f32[] o:f32[] p:f32[128,4] q:f32[128,32] r:f32[128] s:f32[32] t:f32[32] u:f32[]. let
+    v:i32[] = sub 0:i32[] l
+    w:i32[32] = broadcast_to[shape=(32,)] a
+    x:i32[32] = broadcast_to[shape=(32,)] v
+    y:f32[32] <- b[w,x,c]
+    z:i32[32] = add 32:i32[] c
+    ba:i32[32] = broadcast_to[shape=(32,)] a
+    bb:i32[32] = broadcast_to[shape=(32,)] v
+    bc:f32[32] <- b[ba,bb,z]
+    bd:i32[32] = add 64:i32[] c
+    be:i32[32] = broadcast_to[shape=(32,)] a
+    bf:i32[32] = broadcast_to[shape=(32,)] v
+    bg:f32[32] <- b[be,bf,bd]
+    bh:i32[32] = add 96:i32[] c
+    bi:i32[32] = broadcast_to[shape=(32,)] a
+    bj:i32[32] = broadcast_to[shape=(32,)] v
+    bk:f32[32] <- b[bi,bj,bh]
+    bl:i32[32] = add 128:i32[] c
+    bm:i32[32] = broadcast_to[shape=(32,)] a
+    bn:i32[32] = broadcast_to[shape=(32,)] v
+    bo:f32[32] <- b[bm,bn,bl]
+    bp:i32[32] = add 160:i32[] c
+    bq:i32[32] = broadcast_to[shape=(32,)] a
+    br:i32[32] = broadcast_to[shape=(32,)] v
+    bs:f32[32] <- b[bq,br,bp]
+    bt:i32[4] = add 192:i32[] d
+    bu:i32[4] = broadcast_to[shape=(4,)] a
+    bv:i32[4] = broadcast_to[shape=(4,)] v
+    bw:f32[4] <- b[bu,bv,bt]
+    bx:f32[] <- b[a,v,196]
+    by:f32[] <- b[a,v,197]
+    bz:f32[] <- b[a,v,198]
+    ca:f32[] <- e[a,v]
+    cb:f32[] = exp ca
+    cc:f32[] = sub by bx
+    cd:f32[] = mul cc cb
+    ce:bool[] = ge cd 0.0:f32[]
+    cf:f32[] = jit[
+      name=_where
+      jaxpr={ lambda ; ce:bool[] cg:f32[] ch:f32[]. let
+          cf:f32[] = select_n ce ch cg
+        in (cf,) }
+    ] ce 1.0:f32[] -1.0:f32[]
+    ci:f32[] = mul 0.0003:f32[] cf
+    cj:f32[] = add 1.0:f32[] ci
+    ck:f32[] = convert_element_type[new_dtype=float32 weak_type=False] cj
+    cl:f32[] = mul f ck
+    cm:f32[] = mul cl cb
+    cn:f32[] = add n cm
+    co:f32[] = neg cl
+    cp:f32[] = mul co cb
+    cq:f32[] = mul cl cd
+    cr:f32[] = add cq o
+    cs:f32[] = mul cn 1.0:f32[]
+    ct:f32[] = div cs cb
+    cu:f32[] = mul cn by
+    cv:f32[] = sub cr cu
+    cw:f32[] = mul ct bz
+    cx:f32[] = sub 1.0:f32[] bz
+    cy:f32[] = mul cw cx
+    cz:f32[32] = mul cy bc
+    da:f32[32] = add t cz
+    db:f32[] = add u cy
+    dc:f32[32] = mul cy g
+    dd:f32[32] = add m dc
+    de:f32[32] = sub 1.0:f32[] bk
+    df:f32[32] = mul dd de
+    dg:f32[32] = integer_pow[y=2] bo
+    dh:f32[32] = sub 1.0:f32[] dg
+    di:f32[32] = mul df dh
+    dj:f32[32] = sub y bo
+    dk:f32[32] = mul dd dj
+    dl:f32[32] = mul dk bk
+    dm:f32[32] = sub 1.0:f32[] bk
+    dn:f32[32] = mul dl dm
+    do:f32[32] = add bs h
+    dp:f32[32] = mul di do
+    dq:f32[32] = mul dp bg
+    dr:f32[32] = sub 1.0:f32[] bg
+    ds:f32[32] = mul dq dr
+    dt:f32[32] = mul di bg
+    du:f32[64] = concatenate[dimension=0] ds dn
+    dv:f32[32] = broadcast_in_dim[
+      broadcast_dimensions=()
+      shape=(32,)
+      sharding=None
+    ] 0.0:f32[]
+    dw:f32[64] = concatenate[dimension=0] di dv
+    dx:f32[32] = broadcast_in_dim[
+      broadcast_dimensions=()
+      shape=(32,)
+      sharding=None
+    ] 0.0:f32[]
+    dy:f32[64] = concatenate[dimension=0] dt dx
+    dz:f32[128] = concatenate[dimension=0] du dw
+    ea:f32[128] = concatenate[dimension=0] du dy
+    eb:f32[128,1] = broadcast_in_dim[
+      broadcast_dimensions=(0,)
+      shape=(128, 1)
+      sharding=None
+    ] dz
+    ec:f32[1,4] = broadcast_in_dim[
+      broadcast_dimensions=(1,)
+      shape=(1, 4)
+      sharding=None
+    ] bw
+    ed:f32[128,4] = mul eb ec
+    ee:f32[128,4] = add p ed
+    ef:f32[128,1] = broadcast_in_dim[
+      broadcast_dimensions=(0,)
+      shape=(128, 1)
+      sharding=None
+    ] ea
+    eg:f32[1,32] = broadcast_in_dim[
+      broadcast_dimensions=(1,)
+      shape=(1, 32)
+      sharding=None
+    ] y
+    eh:f32[128,32] = mul ef eg
+    ei:f32[128,32] = add q eh
+    ej:f32[128] = add r dz
+    ek:f32[32] = add s dt
+    el:f32[128,1] = broadcast_in_dim[
+      broadcast_dimensions=(0,)
+      shape=(128, 1)
+      sharding=None
+    ] ea
+    em:f32[128,32] = mul i el
+    en:f32[32] = reduce_sum[axes=(0,)] em
+    eo:f32[32] = mul dd bk
+    ep:f32[32] = add en eo
+    eq:f32[128,1] = broadcast_in_dim[
+      broadcast_dimensions=(0,)
+      shape=(128, 1)
+      sharding=None
+    ] dz
+    er:f32[128,4] = mul j eq
+    es:f32[4] = reduce_sum[axes=(0,)] er
+    et:f32[1] = slice[limit_indices=(4,) start_indices=(3,) strides=None] es
+    eu:f32[] = squeeze[dimensions=(0,)] et
+    ev:f32[] = mul eu cb
+    ew:f32[] = div ev 1.0:f32[]
+    ex:f32[] = add cp ew
+    ey:f32[1] = slice[limit_indices=(1,) start_indices=(0,) strides=None] es
+    ez:f32[] = squeeze[dimensions=(0,)] ey
+    fa:f32[] = add cv ez
+    fb:f32[1] = slice[limit_indices=(2,) start_indices=(1,) strides=None] es
+    fc:f32[] = squeeze[dimensions=(0,)] fb
+    fd:f32[] = add fa fc
+    fe:f32[1] = slice[limit_indices=(4,) start_indices=(3,) strides=None] es
+    ff:f32[] = squeeze[dimensions=(0,)] fe
+    fg:f32[] = mul ff bx
+    fh:f32[] = mul fg cb
+    fi:f32[] = div fh 1.0:f32[]
+    fj:f32[] = add fd fi
+    fk:f32[1] = slice[limit_indices=(2,) start_indices=(1,) strides=None] es
+    fl:f32[] = squeeze[dimensions=(0,)] fk
+    fm:f32[] = neg fl
+    fn:bool[] = eq v 0:i32[]
+    fo:f32[] = jit[
+      name=_where
+      jaxpr={ lambda ; fn:bool[] fm:f32[] fp:f32[]. let
+          fq:f32[] = convert_element_type[new_dtype=float32 weak_type=False] fp
+          fo:f32[] = select_n fn fq fm
+        in (fo,) }
+    ] fn fm 0.0:f32[]
+    fr:f32[] = add fj fo
+    k[a,v] <- fr
+  in (ep, ex, fm, ee, ei, ej, ek, da, db) }
+msg=('f32', 'i1')
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.

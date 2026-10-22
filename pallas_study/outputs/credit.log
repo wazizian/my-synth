@@ -1,0 +1,99 @@
+COMPILE historical jax
+COMPILE historical pallas_gru
+COMPILE historical pallas_trajectory
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/pallas/pallas_study/benchmark.py", line 225, in <module>
+    main()
+  File "/workspace/pallas/pallas_study/benchmark.py", line 162, in main
+    result = compiled(model, state, inputs)
+  File "/workspace/pallas/pallas_study/benchmark.py", line 141, in update
+    value, gradients = eqx.filter_value_and_grad(objective)(model, inputs)
+  File "/workspace/pallas/pallas_study/benchmark.py", line 114, in objective
+    return risk(model.terminal_losses(fixed_paths.log_spot, historical=True))
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_module/_prebuilt.py", line 33, in __call__
+    return self.__func__(self.__self__, *args, **kwargs)
+  File "/workspace/pallas/pallas_study/persistent.py", line 205, in terminal_losses
+    return losses(parameters, log_spot, cost, cap, premium, strike, historical)
+  File "/workspace/pallas/pallas_study/persistent.py", line 93, in forward_rule
+    value, tape = forward(parameters, prices, cost, cap, premium, strike, historical)
+  File "/workspace/pallas/pallas_study/persistent.py", line 82, in forward
+    return pl.pallas_call(kernel, out_shape=outputs, grid=(batch,), name='persistent_hedger_forward')(*parameters, prices)
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 1737, in wrapped
+    jaxpr, consts = _trace_kernel_to_jaxpr(
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 1212, in _trace_kernel_to_jaxpr
+    jaxpr, _, consts = pe.trace_to_jaxpr_dynamic(
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/primitives.py", line 809, in wrap_with_transforms
+    return f(*new_args)
+  File "/workspace/pallas/pallas_study/persistent.py", line 73, in kernel
+    _, shares, accumulated = jax.lax.fori_loop(0, n_steps, step,
+  File "/workspace/pallas/pallas_study/persistent.py", line 46, in step
+    x = jnp.stack((lp, previous, (n_steps-day)/n_steps, old_shares))
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/numpy/lax_numpy.py", line 4429, in stack
+    return concatenate(new_arrays, axis=axis, dtype=dtype)
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/numpy/lax_numpy.py", line 4600, in concatenate
+    arrays_out = [lax.concatenate(arrays_out[i:i+k], axis)
+jax._src.source_info_util.JaxStackTraceBeforeTransformation: NotImplementedError: Only 2-argument concatenate is supported.
+
+The preceding stack trace is the source of the JAX operation that, once transformed by JAX, triggered the following exception.
+
+--------------------
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/pallas/pallas_study/benchmark.py", line 225, in <module>
+    main()
+  File "/workspace/pallas/pallas_study/benchmark.py", line 162, in main
+    result = compiled(model, state, inputs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_jit.py", line 209, in __call__
+    return _call(self, False, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/equinox/_jit.py", line 263, in _call
+    marker, _, _ = out = jit_wrapper._cached(
+                         ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 1330, in _pallas_call_lowering
+    return mlir.lower_per_platform(ctx, "pallas_call",
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/pallas_call.py", line 1326, in gpu_lowering
+    return pallas_call_registration.pallas_call_lowering(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/pallas_call_registration.py", line 95, in pallas_call_lowering
+    lowering_result = lowering.lower_jaxpr_to_triton_module(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 370, in lower_jaxpr_to_triton_module
+    () = lower_jaxpr_to_triton_ir(ctx, jaxpr, block_infos, *entry.arguments)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 419, in lower_jaxpr_to_triton_ir
+    outvals = rule(rule_ctx, *invals, **eqn.params)
+    ^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 2642, in _scan_lowering_rule
+    for_out = _lower_jaxpr_to_for_loop(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 2596, in _lower_jaxpr_to_for_loop
+    all_out = lower_jaxpr_to_triton_ir(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 419, in lower_jaxpr_to_triton_ir
+    outvals = rule(rule_ctx, *invals, **eqn.params)
+    ^^^^^
+  File "/workspace/pallas-env/lib/python3.12/site-packages/jax/_src/pallas/triton/lowering.py", line 1823, in _concatenate_lowering_rule
+    raise NotImplementedError("Only 2-argument concatenate is supported.")
+NotImplementedError: Only 2-argument concatenate is supported.
+--------------------
+For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+COMPILE hedger jax
+COMPILE hedger pallas_jvp
+COMPILE hedger pallas_saved
+RESULT hedger jax 500.6635616688679
+RESULT hedger pallas_jvp 681.7923789688697
+RESULT hedger pallas_saved 501.3877779711038
+COMPILE sde jax
+COMPILE sde pallas_jvp
+COMPILE sde pallas_saved
+RESULT sde jax 1.953499624505639
+RESULT sde pallas_jvp 2.084233332425356
+RESULT sde pallas_saved 3.3083973297228417

@@ -1,0 +1,92 @@
+{"network": "gru", "width": 32, "output": {"max_abs": 1.7881393432617188e-07, "relative_l2": 8.222680129101866e-08}, "gradient": {"max_abs": 2.384185791015625e-07, "relative_l2": 1.0329487512610093e-07}, "jvp": {"max_abs": 2.9802322387695312e-08, "relative_l2": 3.3806266947652718e-09}, "hessian_vector": {"max_abs": 1.1920928955078125e-07, "relative_l2": 1.1354477011731011e-07}, "finite_difference": -0.32711026072502136, "directional_derivative": -0.3274023234844208}
+{"network": "mlp", "width": 32, "output": {"max_abs": 3.725290298461914e-08, "relative_l2": 2.371182934850822e-07}, "gradient": {"max_abs": 5.960464477539063e-08, "relative_l2": 2.3814097590005682e-07}, "jvp": {"max_abs": 1.862645149230957e-08, "relative_l2": 2.987482074301829e-07}, "hessian_vector": {"max_abs": 5.21540641784668e-08, "relative_l2": 2.598215458311299e-07}, "finite_difference": -0.04740804061293602, "directional_derivative": -0.04742080718278885}
+{"network": "gru", "width": 64, "output": {"max_abs": 1.1920928955078125e-07, "relative_l2": 7.633068967927301e-08}, "gradient": {"max_abs": 4.76837158203125e-07, "relative_l2": 9.067437820507314e-08}, "jvp": {"max_abs": 1.9073486328125e-06, "relative_l2": 9.081088561136644e-08}, "hessian_vector": {"max_abs": 1.4901161193847656e-07, "relative_l2": 1.1796252491018877e-07}, "finite_difference": -7.8916544914245605, "directional_derivative": -7.891075611114502}
+{"network": "mlp", "width": 64, "output": {"max_abs": 4.470348358154297e-08, "relative_l2": 1.811408831229992e-07}, "gradient": {"max_abs": 7.450580596923828e-08, "relative_l2": 2.0062206662934324e-07}, "jvp": {"max_abs": 1.341104507446289e-07, "relative_l2": 1.0117867064704244e-06}, "hessian_vector": {"max_abs": 2.384185791015625e-07, "relative_l2": 3.277268338171827e-07}, "finite_difference": 0.06626173108816147, "directional_derivative": 0.06624657660722733}
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 12.168782693333924
+RESULT hedger pallas_gru 10.139837116003036
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 12.819653493352234
+RESULT historical pallas_gru 10.78070851508528
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+RESULT sde_score jax 29.545572493225336
+RESULT sde_score pallas_mlp 28.135712607763708
+COMPILE sde_score_flat jax
+COMPILE sde_score_flat pallas_mlp
+RESULT sde_score_flat jax 1.3444107957184315
+RESULT sde_score_flat pallas_mlp 1.267929608002305
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 40.18294531852007
+RESULT sde_pathwise pallas_mlp 38.35163260810077
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 43.4834981104359
+RESULT joint pallas_gru 41.471376991830766
+RESULT joint pallas_mlp 41.46233268547803
+RESULT joint pallas_both 39.58900680299848
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 13.32811659667641
+RESULT hedger pallas_gru 11.197958886623383
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 13.699960801750422
+RESULT historical pallas_gru 11.564862006343901
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+RESULT sde_score jax 32.00283718761057
+RESULT sde_score pallas_mlp 28.99424689821899
+COMPILE sde_score_flat jax
+COMPILE sde_score_flat pallas_mlp
+RESULT sde_score_flat jax 1.279309787787497
+RESULT sde_score_flat pallas_mlp 1.3029135065153241
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 44.169304985553026
+RESULT sde_pathwise pallas_mlp 40.85109049919993
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 48.66770801600069
+RESULT joint pallas_gru 46.44804170820862
+RESULT joint pallas_mlp 45.26814389973879
+RESULT joint pallas_both 43.1395024061203
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 17.56194259505719
+RESULT hedger pallas_gru 11.86554878950119
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 17.806725902482867
+RESULT historical pallas_gru 12.20394701231271
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+RESULT sde_score jax 43.737980094738305
+RESULT sde_score pallas_mlp 39.29052830208093
+COMPILE sde_score_flat jax
+COMPILE sde_score_flat pallas_mlp
+RESULT sde_score_flat jax 2.3519703885540366
+RESULT sde_score_flat pallas_mlp 2.5848543038591743
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 59.66912489384413
+RESULT sde_pathwise pallas_mlp 58.19278608541936
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 59.54663760494441
+RESULT joint pallas_gru 56.91672791726887
+RESULT joint pallas_mlp 57.925735507160425
+RESULT joint pallas_both 55.28266350738704
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 30.27903358452022
+RESULT historical pallas_gru 22.725522588007152

@@ -1,0 +1,38 @@
+{
+  "batch": 128,
+  "steps": 126,
+  "inner_updates": 2,
+  "results": [
+    {
+      "variant": "jax",
+      "meta_ms": [],
+      "selfplay_ms": [],
+      "compile_and_first_gradient_s": 7.180485018994659,
+      "meta_gradient_error": {
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "meta_value": -0.0008625015616416931,
+      "meta_correct": true,
+      "selfplay_reward_error": {
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "selfplay_correct": true,
+      "correct": true
+    },
+    {
+      "variant": "pallas_gru",
+      "meta_ms": [],
+      "selfplay_ms": [],
+      "meta_correct": false,
+      "meta_error": "ValueError: Too few leaves for PyTreeDef; expected 2, got 1",
+      "selfplay_reward_error": {
+        "max_abs": 2.1600499167107046e-12,
+        "relative_l2": 1.4478821959920203e-06
+      },
+      "selfplay_correct": true,
+      "correct": false
+    }
+  ]
+}

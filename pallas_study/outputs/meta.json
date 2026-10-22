@@ -1,0 +1,23 @@
+{
+  "batch": 128,
+  "steps": 126,
+  "inner_updates": 2,
+  "results": [
+    {
+      "variant": "jax",
+      "compile_and_first_gradient_s": 7.180112794041634,
+      "meta_gradient_error": {
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "selfplay_reward_error": {
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "meta_value": -0.0008625015616416931,
+      "meta_ms": [],
+      "selfplay_ms": [],
+      "correct": true
+    }
+  ]
+}

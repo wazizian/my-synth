@@ -1,0 +1,50 @@
+{
+  "config": {
+    "batch": 128,
+    "steps": 126,
+    "hidden": 32,
+    "repeats": 9,
+    "updates": 10,
+    "saved_backward": true,
+    "precision": "highest",
+    "persistent": true,
+    "dtype": "float64",
+    "output": "outputs/persistent-f64-b128.json",
+    "tasks": [
+      "historical"
+    ]
+  },
+  "jax": "0.7.2",
+  "python": "3.12.15",
+  "device": "cuda:0",
+  "results": [
+    {
+      "task": "historical",
+      "variant": "jax",
+      "compile_and_first_update_s": 1.396700416924432,
+      "loss": 0.1958517881591816,
+      "loss_error": 0.0,
+      "gradient_error": {
+        "max_abs": 0.0,
+        "relative_l2": 0.0
+      },
+      "correct": true,
+      "update_ms": [],
+      "forward_ms": []
+    },
+    {
+      "task": "historical",
+      "variant": "pallas_gru",
+      "compile_and_first_update_s": 1.734134745085612,
+      "loss": 0.1958517881591816,
+      "loss_error": 0.0,
+      "gradient_error": {
+        "max_abs": 5.551115123125783e-17,
+        "relative_l2": 2.0951473670582775e-16
+      },
+      "correct": true,
+      "update_ms": [],
+      "forward_ms": []
+    }
+  ]
+}

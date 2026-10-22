@@ -1,0 +1,84 @@
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 8.387364796362817
+RESULT hedger pallas_gru 6.805050000548363
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 8.958085114136338
+RESULT historical pallas_gru 7.280762400478125
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+REJECT sde_score pallas_mlp {'max_abs': 3.0956987757235765e-05, 'relative_l2': 0.0038154372766806147}
+RESULT sde_score jax 17.12301231455058
+COMPILE sde_score_flat jax
+COMPILE sde_score_flat pallas_mlp
+REJECT sde_score_flat pallas_mlp {'max_abs': 3.095518331974745e-05, 'relative_l2': 0.0038154332014759453}
+RESULT sde_score_flat jax 1.2815756956115365
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 20.54708800278604
+RESULT sde_pathwise pallas_mlp 24.86217941623181
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 23.887007893063128
+RESULT joint pallas_gru 23.36486908607185
+RESULT joint pallas_mlp 27.985820011235774
+RESULT joint pallas_both 26.9844857044518
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 13.849349110387266
+RESULT hedger pallas_gru 9.00393151678145
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 14.235564693808556
+RESULT historical pallas_gru 9.554320084862411
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+REJECT sde_score pallas_mlp {'max_abs': 2.973695518448949e-05, 'relative_l2': 0.008556003756510413}
+RESULT sde_score jax 21.135316602885723
+COMPILE sde_score_flat jax
+COMPILE sde_score_flat pallas_mlp
+REJECT sde_score_flat pallas_mlp {'max_abs': 2.9740214813500643e-05, 'relative_l2': 0.008556895383136752}
+RESULT sde_score_flat jax 2.0327895181253552
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 25.18593710847199
+RESULT sde_pathwise pallas_mlp 26.598877809010446
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 33.86704057920724
+RESULT joint pallas_gru 29.016143991611898
+RESULT joint pallas_mlp 32.2548340074718
+RESULT joint pallas_both 30.35711150150746
+COMPILE hedger jax
+COMPILE hedger pallas_gru
+RESULT hedger jax 8.47265429329127
+RESULT hedger pallas_gru 7.262962707318366
+COMPILE historical jax
+COMPILE historical pallas_gru
+RESULT historical jax 8.962924196384847
+RESULT historical pallas_gru 8.873830502852798
+COMPILE sde_score jax
+COMPILE sde_score pallas_mlp
+REJECT sde_score pallas_mlp {'max_abs': 3.095675492659211e-05, 'relative_l2': 0.003844238871636152}
+RESULT sde_score jax 17.09998541045934
+COMPILE sde_score_flat jax
+COMPILE sde_score_flat pallas_mlp
+REJECT sde_score_flat pallas_mlp {'max_abs': 3.095518331974745e-05, 'relative_l2': 0.0038443676381349078}
+RESULT sde_score_flat jax 1.2824477860704064
+COMPILE sde_pathwise jax
+COMPILE sde_pathwise pallas_mlp
+RESULT sde_pathwise jax 20.898336311802268
+RESULT sde_pathwise pallas_mlp 19.283078401349485
+COMPILE joint jax
+COMPILE joint pallas_gru
+COMPILE joint pallas_mlp
+COMPILE joint pallas_both
+RESULT joint jax 24.056126782670617
+RESULT joint pallas_gru 22.692577494308352
+RESULT joint pallas_mlp 21.316949906758964
+RESULT joint pallas_both 21.07610651291907

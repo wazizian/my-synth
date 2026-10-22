@@ -1,0 +1,246 @@
+{
+  "created_utc": "2026-10-22T08:00:29.571221+00:00",
+  "export_files_checked": 106,
+  "export_mismatches": [],
+  "source_provenance": {
+    "analytic-high-b128.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "4eb36db75bcde51de4a8b065d5fed60667a883d11deadb1506964e45ad5f36b2",
+        "matching_local_files": [
+          "versions/v4/kernels.py",
+          "versions/v5/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    },
+    "analytic-high-b256.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "4eb36db75bcde51de4a8b065d5fed60667a883d11deadb1506964e45ad5f36b2",
+        "matching_local_files": [
+          "versions/v4/kernels.py",
+          "versions/v5/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    },
+    "analytic-high-b1024.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "4eb36db75bcde51de4a8b065d5fed60667a883d11deadb1506964e45ad5f36b2",
+        "matching_local_files": [
+          "versions/v4/kernels.py",
+          "versions/v5/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    },
+    "analytic-f64-b128.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "4eb36db75bcde51de4a8b065d5fed60667a883d11deadb1506964e45ad5f36b2",
+        "matching_local_files": [
+          "versions/v4/kernels.py",
+          "versions/v5/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    },
+    "final-high-b128.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "74bee197f5cb9f1b60a6a2f4701e8f1dc2f23501251c1fc7ce01eefa7850aa76",
+        "matching_local_files": [
+          "versions/v6/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    },
+    "final-high-b1024.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "74bee197f5cb9f1b60a6a2f4701e8f1dc2f23501251c1fc7ce01eefa7850aa76",
+        "matching_local_files": [
+          "versions/v6/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    },
+    "final-default-b128.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "74bee197f5cb9f1b60a6a2f4701e8f1dc2f23501251c1fc7ce01eefa7850aa76",
+        "matching_local_files": [
+          "versions/v6/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    },
+    "final-default-b1024.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "74bee197f5cb9f1b60a6a2f4701e8f1dc2f23501251c1fc7ce01eefa7850aa76",
+        "matching_local_files": [
+          "versions/v6/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    },
+    "saved-default-b128.json": {
+      "benchmark.py": {
+        "sha256": "2f86ba786f51fc0d43c69a5340ccc23ec0eca92288e8f71c3c58c2675b5b2091",
+        "matching_local_files": [
+          "versions/v4/benchmark.py",
+          "versions/v5/benchmark.py",
+          "versions/v6/benchmark.py",
+          "versions/v7/benchmark.py"
+        ]
+      },
+      "kernels.py": {
+        "sha256": "74bee197f5cb9f1b60a6a2f4701e8f1dc2f23501251c1fc7ce01eefa7850aa76",
+        "matching_local_files": [
+          "versions/v6/kernels.py"
+        ]
+      },
+      "persistent.py": {
+        "sha256": "c2a273578c1e2c1e060056cfcf0a40fde55c38b12ca59e610c325fcb64cbefc8",
+        "matching_local_files": [
+          "versions/v4/persistent.py",
+          "versions/v5/persistent.py",
+          "versions/v6/persistent.py"
+        ]
+      }
+    }
+  },
+  "credit_before": 12.266596082394877,
+  "credit_after": 8.300491586694797,
+  "account_credit_decline": 3.9661044957000797,
+  "study_instances_absent": [
+    57110659,
+    57179650
+  ],
+  "a100_confirmation": "SSH direct and proxy timed out; deleted; no benchmark results",
+  "complete_timing_rows": 190,
+  "eligible_pallas_rows": 97
+}
